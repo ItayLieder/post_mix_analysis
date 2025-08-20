@@ -21,6 +21,41 @@ from data_handler import *
 
 # ---------- small utils ----------
 
+import os
+from datetime import datetime
+from dataclasses import dataclass
+
+@dataclass
+class RunPaths:
+    """
+    Handles all paths for a single run of post_mix_analysis.
+    Creates a timestamped run directory with subfolders for logs, reports,
+    assets, and a single 'premastered' folder for ready-to-master audio.
+    """
+
+    root: str
+    logs: str
+    reports: str
+    assets: str
+    premastered: str   # ✅ unified premaster folder
+
+    def __init__(self, base_dir: str, run_name: str = None):
+        if run_name is None:
+            run_name = f"postmix_v1_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+
+        # Root directory for this run
+        self.root = os.path.join(base_dir, run_name)
+
+        # Subfolders
+        self.logs       = os.path.join(self.root, "logs")
+        self.reports    = os.path.join(self.root, "reports")
+        self.assets     = os.path.join(self.reports, "assets")
+        self.premastered = os.path.join(self.root, "premastered")
+
+        # Ensure dirs exist
+        for d in [self.logs, self.reports, self.assets, self.premastered]:
+            os.makedirs(d, exist_ok=True)
+
 def _now_iso() -> str:
     return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
