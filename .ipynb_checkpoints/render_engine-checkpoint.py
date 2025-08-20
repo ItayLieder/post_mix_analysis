@@ -124,10 +124,6 @@ class RenderEngine:
         x_work = self.x
         pre_meta = None
         if opts.save_headroom_first:
-            x_work, pre_meta = premaster_prep(x_work, self.sr, target_peak_dbfs=-6.0, hpf_hz=20.0)
-
-            # If we premastered first, rebuild cache so dials work on the premastered signal
-            self.x = x_work
             self.preprocess()
 
         # dial render over the *full* cache

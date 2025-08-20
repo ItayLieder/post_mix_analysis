@@ -165,16 +165,6 @@ def widen_stereo(x: np.ndarray, sr: int, amount: float) -> Tuple[np.ndarray, Dic
     y = mid_side_decode(M, S * width)
     return y.astype(np.float32), {"width_factor": round(width, 3)}
 
-def premaster_prep(x: np.ndarray, sr: int,
-                   target_peak_dbfs: float = -6.0,
-                   hpf_hz: float = 20.0) -> Tuple[np.ndarray, Dict[str, Any]]:
-    """
-    Pre-master prep: gentle 20 Hz HPF + peak normalization to -6 dBFS.
-    """
-    y = highpass_filter(x, sr, cutoff_hz=hpf_hz, order=2)
-    y = normalize_peak(y, target_dbfs=target_peak_dbfs)
-    return y.astype(np.float32), {"hpf_hz": hpf_hz, "target_peak_dbfs": target_peak_dbfs}
-
 # ---------- Fast preview via preprocess cache ----------
 
 @dataclass
@@ -264,4 +254,4 @@ def render_from_cache(cache: PreviewCache,
 print("Patched: render_from_cache now unpacks widen_stereo tuple correctly.")
 
 
-print("Processors (Feature Macros) loaded: make_bassier, make_punchier, reduce_mud, add_air, widen_stereo, premaster_prep, build_preview_cache, render_from_cache.")
+print("Processors (Feature Macros) loaded: make_bassier, make_punchier, reduce_mud, add_air, widen_stereo, build_preview_cache, render_from_cache.")
