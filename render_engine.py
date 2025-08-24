@@ -47,82 +47,6 @@ class RenderEngine:
         self.sr = int(sr)
         self.pre_cfg = preprocess or PreprocessConfig()
         self.cache = None  # filled by self.preprocess()
-
-
-    # ---------- BATCH VARIANTS ----------
-    def commit_variants(self, out_dir, variants_plan, opts):
-        """
-        Render all variants in variants_plan into out_dir.
-        Each variant is a dict with at least:
-          - name: str
-          - recommended: bool
-          - params: dict of DSP params
-        Recommended variants will get '_recommended' in their filename.
-        """
-    
-        os.makedirs(out_dir, exist_ok=True)
-        metas = []
-    
-        for variant in variants_plan:
-            # Build output filename
-            if variant.get("recommended", False):
-                filename = f"{variant['name']}_recommended.wav"
-            else:
-                filename = f"{variant['name']}.wav"
-    
-            out_path = os.path.join(out_dir, filename)
-    
-            # Render the variant
-            audio = self.render_variant(variant, opts)
-    
-            # Save at target bit depth (usually 24bit) and peak normalization
-            save_wav_24bit(out_path, audio, opts.sr)
-    
-            # Collect metadata
-            meta = {
-                "name": variant["name"],
-                "recommended": variant.get("recommended", False),
-                "params": variant.get("params", {}),
-                "out_path": out_path,
-                "bit_depth": opts.bit_depth,
-                "peak_target_dbfs": opts.target_peak_dbfs,
-            }
-            metas.append(meta)
-    
-        return metas
-
-
-    
-    def render_variants(self, out_dir, variants_plan, opts):
-        """
-        Render all premastered variants (without mastering) into out_dir.
-        Each variant in variants_plan is (name, DialState).
-        """
-        os.makedirs(out_dir, exist_ok=True)
-        metas = []
-        for name, dials in variants_plan:
-            out_path = os.path.join(out_dir, f"{name}.wav")
-            
-            self._ensure_cache()
-            y, params = render_from_cache(
-                self.cache,
-                bass_amount=dials.bass,
-                punch_amount=dials.punch,
-                clarity_amount=dials.clarity,
-                air_amount=dials.air,
-                width_amount=dials.width,
-                target_peak_dbfs=opts.target_peak_dbfs
-            )
-            sf.write(out_path, y, self.sr, subtype=opts.bit_depth)
-            
-            metas.append({
-                "name": name,
-                "out_path": out_path,
-                "dials": dials.__dict__,
-                "sr": self.sr,
-                "bit_depth": opts.bit_depth,
-            })
-        return metas
     
     def preprocess(self) -> Dict[str, Any]:
         """Build fast preview cache (low/high split, kick band, envelope)."""
@@ -200,6 +124,10 @@ class RenderEngine:
         x_work = self.x
         pre_meta = None
         if opts.save_headroom_first:
+            x_work, pre_meta = premaster_prep(x_work, self.sr, target_peak_dbfs=-6.0, hpf_hz=20.0)
+
+            # If we premastered first, rebuild cache so dials work on the premastered signal
+            self.x = x_work
             self.preprocess()
 
         # dial render over the *full* cache
@@ -240,4 +168,18 @@ class RenderEngine:
             meta["premaster_first"] = pre_meta
         return meta
 
-
+    # ---------- BATCH VARIANTS ----------
+    def commit_variants(self,
+                        base_outdir: str,
+                        variants: List[Tuple[str, DialState]],
+                        opts: Optional[RenderOptions] = None) -> List[Dict[str, Any]]:
+        """
+        Render multiple named variants and return their metadata.
+        variants: list of (name, DialState)
+        """
+        results = []
+        for name, d in variants:
+            out_path = os.path.join(base_outdir, f"{name}.wav")
+            info = self.commit(out_path, dials=d, opts=opts)
+            results.append(info)
+        return results

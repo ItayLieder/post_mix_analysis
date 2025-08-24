@@ -21,46 +21,6 @@ from data_handler import *
 
 # ---------- small utils ----------
 
-from dataclasses import dataclass
-import os
-from datetime import datetime
-
-@dataclass
-class RunPaths:
-    root: str
-    inputs: str
-    work: str
-    outputs: str
-    reports: str
-    logs: str
-    assets: str
-    premastered: str   # ✅ new unified folder
-
-    def __init__(self, base_dir: str, run_name: str = None):
-        if run_name is None:
-            run_name = f"postmix_v1_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-
-        self.root = os.path.join(base_dir, run_name)
-
-        # Subfolders
-        self.logs = os.path.join(self.root, "logs")
-        self.reports = os.path.join(self.root, "reports")
-        self.assets = os.path.join(self.reports, "assets")
-        self.inputs = os.path.join(self.root, "inputs")
-        self.work = os.path.join(self.root, "work")
-        self.outputs = os.path.join(self.root, "outputs")
-
-        # ✅ single premastered folder
-        self.premastered = os.path.join(self.outputs, "premastered")
-
-        # Make sure folders exist
-        for d in [
-            self.logs, self.reports, self.assets,
-            self.inputs, self.work, self.outputs, self.premastered
-        ]:
-            os.makedirs(d, exist_ok=True)
-
-
 def _now_iso() -> str:
     return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
@@ -321,6 +281,7 @@ CODE_VERSIONS = {
     "dsp_primitives":     "v0.4.1",
     "processors":         "v0.5.0",
     "render_engine":      "v0.2.0",
+    "premaster_prep":     "v0.1.0",
     "orchestrator":       "v0.1.0",
     "stream_sim":         "v0.1.0",
     "compare_reporting":  "v0.1.0",

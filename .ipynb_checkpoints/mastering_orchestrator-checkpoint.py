@@ -1,5 +1,3 @@
-
-
 # Mastering Orchestrator — Notebook Layer
 # Provider-agnostic runner that:
 #  - accepts a pre-master WAV
@@ -11,16 +9,16 @@
 #  - LandrProvider (stub): method contracts to implement when you wire real API calls
 
 # ---- SAFE Mastering patch: limiter + toned-down styles ----
-import numpy as np
-from dataclasses import dataclass, asdict
-
-from typing import Optional, Tuple, Dict, Any, List
-import soundfile as sf
-from scipy import signal
 import os
-import soundfile as sf
+import time
 import numpy as np
-from data_handler import *
+import soundfile as sf
+from typing import Optional, Tuple, Dict, Any, List
+from dataclasses import dataclass, asdict
+from scipy import signal
+
+from data_handler import register_artifact
+from dsp_premitives import boost_bass, tighten_kick_bass_robust
 
 # --- Mastering request/result contracts ---
 
@@ -41,13 +39,10 @@ class MasterResult:
     bit_depth: str
     params: Dict[str, Any]
 
-
-
 @dataclass
 class MasteringResult:
     out_path: str
     params: Dict[str, Any]
-
 
 class MasteringProvider:
     """
@@ -75,8 +70,6 @@ class MasteringProvider:
         sf.write(out_path, y, sr, subtype="PCM_24")
         return MasteringResult(out_path=out_path, params={"preset": preset or "transparent"})
 
-
-
 class LocalMasteringProvider(MasteringProvider):
     """
     Example local mastering chain: EQ + compression + limiter.
@@ -102,7 +95,6 @@ class LocalMasteringProvider(MasteringProvider):
 
         return MasteringResult(out_path=out_path, params={"preset": preset or "basic_normalize"})
 
-
 class LandrStubProvider(MasteringProvider):
     """
     Stub for LANDR or other API-based mastering services.
@@ -120,12 +112,11 @@ class LandrStubProvider(MasteringProvider):
         sf.write(out_path, y, sr, subtype="PCM_24")
         return MasteringResult(out_path=out_path, params={"preset": preset or "api_stub"})
 
-
-
-def _sanitize(x): 
+def _sanitize(x):
     return np.clip(np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0), -4.0, 4.0).astype(np.float32)
 
-def _db_to_lin(db): return 10.0**(db/20.0)
+def _db_to_lin(db): 
+    return 10.0**(db/20.0)
 
 def true_peak_db_approx(x: np.ndarray, sr: int, oversample: int = 4) -> float:
     x_os = signal.resample_poly(_sanitize(x), oversample, 1, axis=0 if x.ndim>1 else 0)
@@ -310,6 +301,16 @@ class LandrProvider(MasteringProvider):
     def download(self, job_id: str, out_path: str) -> MasterResult:
         raise NotImplementedError("LANDR adapter not wired yet. Implement download to out_path.")
 
+# --- Shared helper for preview LUFS ---
+def _k_weighted_lufs(mono: np.ndarray, sr: int) -> float:
+    """
+    Lightweight K-weight-ish highpass + RMS -> LUFS approximation used for preview matching.
+    """
+    sos_hp = signal.butter(2, 38.0/(sr*0.5), btype='highpass', output='sos')
+    xk = signal.sosfilt(sos_hp, mono)
+    ms = float(np.mean(xk**2))
+    return -0.691 + 10*np.log10(max(1e-12, ms))
+
 # --- Orchestrator ---
 class MasteringOrchestrator:
     """
@@ -336,7 +337,8 @@ class MasteringOrchestrator:
                 name = f"{prov.name}_{style}_{int(round(strength*100))}"
                 out_path = os.path.join(base_outdir, f"{name}.wav")
 
-                if isinstance(prov, LocalMasterProvider):
+                # Accept both provider class variants if present in the codebase
+                if isinstance(prov, (LocalMasterProvider, LocalMasteringProvider)):
                     res = prov.run_sync(MasterRequest(premaster_path, style=style, strength=strength), out_path)
                 else:
                     # external provider flow (submit -> poll -> download)
@@ -362,17 +364,9 @@ class MasteringOrchestrator:
 
                 # optional preview copies level-matched to a LUFS target (for A/B only)
                 if level_match_preview_lufs is not None:
-                    # lightweight LUFS approx + gain
-                    from scipy import signal
-                    def k_weight(mono, sr):
-                        # simple K-weight from earlier; inline here for convenience
-                        sos_hp = signal.butter(2, 38.0/(sr*0.5), btype='highpass', output='sos')
-                        y = signal.sosfilt(sos_hp, mono)
-                        return y
                     x, sr = sf.read(res.out_path)
                     mono = x if x.ndim==1 else np.mean(x, axis=1)
-                    xk = k_weight(mono, sr)
-                    ms = float(np.mean(xk**2)); cur_lufs = -0.691 + 10*np.log10(max(1e-12, ms))
+                    cur_lufs = _k_weighted_lufs(mono, sr)
                     delta = level_match_preview_lufs - cur_lufs
                     x_matched = (x * _db_to_lin(delta)).astype(np.float32)
                     # keep true peak safe
@@ -383,5 +377,81 @@ class MasteringOrchestrator:
                         "provider": res.provider, "style": res.style, "strength": res.strength,
                         "level_matched_lufs": level_match_preview_lufs
                     }, stage=f"{name}__preview")
+
+        # === Extra DSP variants (faithful to provided code) ===
+        stem = os.path.splitext(os.path.basename(premaster_path))[0]
+
+        extra_variants = [
+            (
+                "dsp_bass_boost_100",
+                boost_bass,
+                {
+                    "shelf_db": 3.0,
+                    "shelf_hz": 80.0,
+                    "dyn_bass": True,
+                    "headroom_db": -1.0,
+                },
+            ),
+            (
+                "dsp_punch_boost_100",
+                tighten_kick_bass_robust,
+                {
+                    "kick_lo": 40.0,
+                    "kick_hi": 110.0,
+                    "low_cutoff": 120.0,
+                    "duck_depth_db": 4.0,
+                    "attack_ms": 4.0,
+                    "release_ms": 90.0,
+                    "mud_hz": 180.0,
+                    "mud_db": -1.2,
+                    "headroom_db": -1.0,
+                },
+            ),
+        ]
+
+        for name, fn, kwargs in extra_variants:
+            out_path = os.path.join(base_outdir, f"{name}.wav")
+
+            # Run the exact DSP function on the *premaster* path
+            fn(premaster_path, out_path, **kwargs)
+
+            # Collect technicals and register, consistent with other results
+            info = sf.info(out_path)
+            res = MasterResult(
+                provider="dsp",
+                style=name,
+                strength=1.0,
+                out_path=out_path,
+                sr=info.samplerate,
+                bit_depth="FLOAT",   # scipy.io.wavfile.write writes 32-bit float WAV
+                params=kwargs.copy(),
+            )
+
+            # Register artifact just like the provider results
+            register_artifact(self.man, res.out_path, kind=out_tag, params={
+                "provider": res.provider,
+                "style": res.style,
+                "strength": res.strength,
+                **res.params
+            }, stage=name)
+
+            results.append(res)
+
+            # Optional: create level-matched preview (same logic as above)
+            if level_match_preview_lufs is not None:
+                x, sr = sf.read(res.out_path)
+                mono = x if x.ndim == 1 else np.mean(x, axis=1)
+                cur_lufs = _k_weighted_lufs(mono, sr)
+                delta = level_match_preview_lufs - cur_lufs
+                x_matched = (x * _db_to_lin(delta)).astype(np.float32)
+                x_matched = normalize_true_peak(x_matched, sr, target_dbtp=-1.0)
+                prev_path = os.path.join(base_outdir, f"{name}__LM{int(level_match_preview_lufs)}LUFS.wav")
+                sf.write(prev_path, x_matched, sr, subtype=res.bit_depth)
+                register_artifact(self.man, prev_path, kind=f"{out_tag}_preview", params={
+                    "provider": res.provider,
+                    "style": res.style,
+                    "strength": res.strength,
+                    "level_matched_lufs": level_match_preview_lufs
+                }, stage=f"{name}__preview")
 
         return results

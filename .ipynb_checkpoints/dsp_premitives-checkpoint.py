@@ -346,6 +346,329 @@ def fade_out(audio: np.ndarray, sr: int, dur_s: float = 0.01) -> np.ndarray:
         y[-n:, :] *= env[:, None]
     return y.astype(np.float32)
 
+
+import numpy as np
+from scipy.io import wavfile
+from scipy import signal
+import matplotlib.pyplot as plt
+
+def _to_float32(x):
+    if x.dtype == np.int16:
+        return x.astype(np.float32) / 32768.0
+    if x.dtype == np.int32:
+        return x.astype(np.float32) / 2147483648.0
+    if x.dtype == np.uint8:
+        return (x.astype(np.float32) - 128.0) / 128.0
+    return x.astype(np.float32)
+
+def _ensure_stereo(x):
+    if x.ndim == 1:
+        return np.stack([x, x], axis=-1)
+    if x.shape[1] == 1:
+        return np.repeat(x, 2, axis=1)
+    return x
+
+def _db(x, eps=1e-12):
+    return 20*np.log10(np.maximum(eps, np.abs(x)))
+
+def highpass(x, sr, hz=20.0, order=2):
+    b, a = signal.butter(order, hz/(sr*0.5), btype='highpass')
+    return signal.lfilter(b, a, x, axis=0)
+
+def lowshelf_biquad(x, sr, f0=80.0, gain_db=3.0, S=0.5):
+    """
+    RBJ low-shelf filter. S ~ slope (0.1..1 gentle, >1 steeper).
+    """
+    A = 10**(gain_db/40.0)
+    w0 = 2*np.pi*f0/sr
+    cosw0 = np.cos(w0); sinw0 = np.sin(w0)
+    alpha = sinw0/2 * np.sqrt((A + 1/A)*(1/S - 1) + 2)
+    b0 =    A*((A+1) - (A-1)*cosw0 + 2*np.sqrt(A)*alpha)
+    b1 =  2*A*((A-1) - (A+1)*cosw0)
+    b2 =    A*((A+1) - (A-1)*cosw0 - 2*np.sqrt(A)*alpha)
+    a0 =        (A+1) + (A-1)*cosw0 + 2*np.sqrt(A)*alpha
+    a1 =   -2*((A-1) + (A+1)*cosw0)
+    a2 =        (A+1) + (A-1)*cosw0 - 2*np.sqrt(A)*alpha
+    b = np.array([b0, b1, b2]) / a0
+    a = np.array([1.0, a1/a0, a2/a0])
+    return signal.lfilter(b, a, x, axis=0)
+
+def band_low(x, sr, cutoff=120.0, order=4):
+    b, a = signal.butter(order, cutoff/(sr*0.5), btype='lowpass')
+    return signal.lfilter(b, a, x, axis=0)
+
+def envelope_detector(mono, sr, attack_ms=10.0, release_ms=120.0):
+    a_a = np.exp(-1.0/((attack_ms/1000.0)*sr))
+    a_r = np.exp(-1.0/((release_ms/1000.0)*sr))
+    env = np.zeros_like(mono)
+    prev = 0.0
+    for i, v in enumerate(np.abs(mono)):
+        if v > prev:
+            prev = a_a*prev + (1-a_a)*v
+        else:
+            prev = a_r*prev + (1-a_r)*v
+        env[i] = prev
+    return env
+
+def compress_band(band, sr, threshold_db=-24.0, ratio=2.0, attack_ms=10.0, release_ms=120.0, makeup_db=0.0):
+    mono = np.mean(band, axis=1)
+    env = envelope_detector(mono, sr, attack_ms, release_ms)
+    thr = 10**(threshold_db/20.0)
+    gain = np.ones_like(env)
+    for i, e in enumerate(env):
+        if e <= thr:
+            g = 1.0
+        else:
+            over_db = 20*np.log10(e/thr)
+            red_db = over_db - over_db/ratio
+            g = 10**(-red_db/20.0)
+        gain[i] = g
+    gain *= 10**(makeup_db/20.0)
+    return band * gain[:, None]
+
+def peak_normalize(x, target_db=-1.0, eps=1e-12):
+    peak = np.max(np.abs(x)) + eps
+    gain = 10**(target_db/20.0) / peak
+    return x * gain
+
+def boost_bass(in_wav, out_wav,
+               shelf_db=3.0, shelf_hz=80.0, shelf_slope=0.5,
+               dyn_bass=False, dyn_cutoff=120.0, thr_db=-24.0, ratio=2.0, atk_ms=10.0, rel_ms=120.0, makeup_db=0.0,
+               hpf_hz=20.0, headroom_db=-1.0):
+    """
+    Bass enhancement:
+      1) High‑pass at hpf_hz to clean DC/subsonics.
+      2) Low‑shelf boost (shelf_db @ shelf_hz). Start with 2–3 dB at 70–90 Hz.
+      3) Optional dynamic bass: compress lows (< dyn_cutoff) to control boom.
+      4) Peak-normalize to headroom_db (default -1 dBFS).
+
+    Returns processed float32 numpy array.
+    """
+    sr, data = wavfile.read(in_wav)
+    x = _to_float32(data)
+    x = _ensure_stereo(x)
+
+    # cleanup
+    y = highpass(x, sr, hz=hpf_hz, order=2)
+
+    # static shelf
+    if shelf_db != 0.0:
+        y = lowshelf_biquad(y, sr, f0=shelf_hz, gain_db=shelf_db, S=shelf_slope)
+
+    # optional dynamic control on lows
+    if dyn_bass:
+        lows = band_low(y, sr, cutoff=dyn_cutoff, order=4)
+        lows_c = compress_band(lows, sr, threshold_db=thr_db, ratio=ratio, attack_ms=atk_ms, release_ms=rel_ms, makeup_db=makeup_db)
+        # replace only the low band delta to avoid double-boosting highs
+        y = y - lows + lows_c
+
+    # headroom
+    y = np.clip(y, -1.0, 1.0)
+    y = peak_normalize(y, target_db=headroom_db)
+
+    wavfile.write(out_wav, sr, y.astype(np.float32))
+    return y
+
+# --- Quick A/B helpers ---
+def compare_two(path_a, path_b, label_a="A", label_b="B"):
+    def _load_mono(p):
+        sr, d = wavfile.read(p)
+        x = _to_float32(d)
+        x = x if x.ndim == 1 else np.mean(x, axis=1)
+        return sr, x
+
+    srA, a = _load_mono(path_a)
+    srB, b = _load_mono(path_b)
+    # resample B to A if needed
+    if srA != srB:
+        gcd = np.gcd(srB, srA)
+        up = srA // gcd; down = srB // gcd
+        b = signal.resample_poly(b, up, down)
+        srB = srA
+
+    # Spectrum
+    n = 1<<16
+    Aseg = a[:min(len(a), n)]
+    Bseg = b[:min(len(b), n)]
+    winA = np.hanning(len(Aseg)); winB = np.hanning(len(Bseg))
+    SA = np.fft.rfft(Aseg*winA); SB = np.fft.rfft(Bseg*winB)
+    fA = np.fft.rfftfreq(len(Aseg), 1/srA); fB = np.fft.rfftfreq(len(Bseg), 1/srB)
+    plt.figure()
+    plt.plot(fA, _db(np.abs(SA)), label=label_a)
+    plt.plot(fB, _db(np.abs(SB)), label=label_b)
+    plt.xlim(20, 20000); plt.xscale('log')
+    plt.xlabel("Frequency (Hz)"); plt.ylabel("Magnitude (dB)"); plt.title("Spectrum (log freq)")
+    plt.legend()
+    plt.show()
+
+    # Low-band energy comparison
+    def band_power(x, sr, f_lo, f_hi):
+        sos = signal.butter(4, [f_lo/(sr*0.5), f_hi/(sr*0.5)], btype='band', output='sos')
+        y = signal.sosfilt(sos, x)
+        return float(np.sqrt(np.mean(y**2)))
+
+    bassA = band_power(a, srA, 30, 120)
+    bassB = band_power(b, srB, 30, 120)
+    print(f"Bass RMS 30–120 Hz: {label_a}={bassA:.4f}, {label_b}={bassB:.4f}, Δ={bassB-bassA:+.4f}")
+
+
+
+# Robust version: tighten kick & bass with NaN/Inf sanitization and numerically-stable SOS filters.
+# Includes guardrails for cutoff frequencies and sample-rate dependent clamping.
+#
+# Use:
+# y = tighten_kick_bass_robust("mix.wav","mix_punchier.wav",
+#                               kick_lo=40, kick_hi=110, low_cutoff=120,
+#                               duck_depth_db=4.0, attack_ms=4, release_ms=90)
+# sanity_check("mix.wav"); sanity_check("mix_punchier.wav")
+#
+# If you previously saw NaNs, this version should prevent them.
+
+import numpy as np
+from scipy.io import wavfile
+from scipy import signal
+
+def _to_float32(x):
+    if x.dtype == np.int16:  return x.astype(np.float32) / 32768.0
+    if x.dtype == np.int32:  return x.astype(np.float32) / 2147483648.0
+    if x.dtype == np.uint8:  return (x.astype(np.float32) - 128.0) / 128.0
+    return x.astype(np.float32)
+
+def _ensure_stereo(x):
+    if x.ndim == 1: return np.stack([x, x], axis=-1)
+    if x.shape[1] == 1: return np.repeat(x, 2, axis=1)
+    return x
+
+def _sanitize(x):
+    # Replace NaN/Inf with 0 and hard-clip extreme outliers
+    x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+    x = np.clip(x, -4.0, 4.0)  # generous pre-clip to avoid exploding IIR states
+    return x
+
+def _safe_norm(freq, sr, lo=1.0, hi_ratio=0.95):
+    # Clamp absolute Hz to a safe normalized region (0 < wn < 1)
+    nyq = 0.5 * sr
+    f = float(freq)
+    f = max(lo, min(f, nyq * hi_ratio))
+    return f
+
+def _sos_hp(sr, hz, order=2):
+    hz = _safe_norm(hz, sr)
+    return signal.butter(order, hz/(sr*0.5), btype='highpass', output='sos')
+
+def _sos_lp(sr, hz, order=4):
+    hz = _safe_norm(hz, sr)
+    return signal.butter(order, hz/(sr*0.5), btype='lowpass', output='sos')
+
+def _sos_bp(sr, lo_hz, hi_hz, order=4):
+    lo = _safe_norm(lo_hz, sr)
+    hi = _safe_norm(hi_hz, sr)
+    if hi <= lo:  # ensure valid
+        hi = min(max(lo * 1.2, lo + 5.0), 0.49 * sr)
+    wn = [lo/(sr*0.5), hi/(sr*0.5)]
+    return signal.butter(order, wn, btype='bandpass', output='sos')
+
+def peak_normalize(x, target_db=-1.0, eps=1e-9):
+    peak = np.max(np.abs(x))
+    if not np.isfinite(peak) or peak < eps:
+        return np.zeros_like(x)
+    return x * (10**(target_db/20.0) / peak)
+
+def envelope_from_band_sos(band, sr, env_lp_hz=10.0):
+    mono = np.mean(band, axis=1)
+    mono = _sanitize(mono)
+    rect = np.abs(mono)
+    sos = signal.butter(2, _safe_norm(env_lp_hz, sr)/(sr*0.5), btype='lowpass', output='sos')
+    env = signal.sosfilt(sos, rect)
+    # Robust scaling to 0..1
+    p95 = np.percentile(env[~np.isnan(env)], 95) if env.size else 0.0
+    if not np.isfinite(p95) or p95 <= 1e-9:
+        return np.zeros_like(env)
+    env = np.clip(env / p95, 0.0, 1.0)
+    env = _sanitize(env)
+    return env
+
+def smooth_sidechain(env, sr, attack_ms=4.0, release_ms=90.0):
+    a_a = np.exp(-1.0/((attack_ms/1000.0)*sr))
+    a_r = np.exp(-1.0/((release_ms/1000.0)*sr))
+    out = np.zeros_like(env)
+    prev = 0.0
+    for i, e in enumerate(env):
+        if e > prev:
+            prev = a_a*prev + (1-a_a)*e
+        else:
+            prev = a_r*prev + (1-a_r)*e
+        out[i] = prev
+    return out
+
+def peaking_eq_sos(x, sr, f0, gain_db, Q=1.0):
+    # RBJ peaking implemented with SOS via bilinear transform
+    A = 10**(gain_db/40.0)
+    w0 = 2*np.pi*_safe_norm(f0, sr)/sr
+    alpha = np.sin(w0)/(2*Q)
+    cosw0 = np.cos(w0)
+    b0 = 1 + alpha*A
+    b1 = -2*cosw0
+    b2 = 1 - alpha*A
+    a0 = 1 + alpha/A
+    a1 = -2*cosw0
+    a2 = 1 - alpha/A
+    b = np.array([b0, b1, b2])/a0
+    a = np.array([1.0, a1/a0, a2/a0])
+    # Convert to SOS for numerical stability
+    sos = signal.tf2sos(b, a)
+    return signal.sosfilt(sos, x, axis=0)
+
+def tighten_kick_bass_robust(in_wav, out_wav,
+                             kick_lo=40.0, kick_hi=110.0,
+                             low_cutoff=120.0,
+                             duck_depth_db=4.0,
+                             attack_ms=4.0, release_ms=90.0,
+                             mud_hz=180.0, mud_db=-1.2, mud_Q=1.0,
+                             hpf_hz=20.0, headroom_db=-1.0):
+    sr, data = wavfile.read(in_wav)
+    x = _ensure_stereo(_to_float32(data))
+    x = _sanitize(x)
+
+    # 1) High-pass cleanup
+    sos_hp = _sos_hp(sr, hpf_hz, order=2)
+    y = signal.sosfilt(sos_hp, x, axis=0)
+
+    # 2) Split bands
+    sos_lp = _sos_lp(sr, low_cutoff, order=4)
+    sos_kb = _sos_bp(sr, kick_lo, kick_hi, order=4)
+    low = signal.sosfilt(sos_lp, y, axis=0)
+    kick = signal.sosfilt(sos_kb, y, axis=0)
+    nonkick_low = low - kick
+
+    # 3) Kick envelope and duck
+    env = envelope_from_band_sos(kick, sr, env_lp_hz=10.0)
+    env = smooth_sidechain(env, sr, attack_ms=attack_ms, release_ms=release_ms)
+    floor_gain = 10**(-duck_depth_db/20.0)
+    gain_curve = floor_gain + (1.0 - floor_gain) * (1.0 - env)
+    gain_curve = gain_curve[:, None]
+    ducked_nonkick = nonkick_low * gain_curve
+
+    # 4) Recombine
+    lows_tight = ducked_nonkick + kick
+    high = y - low
+    y_out = lows_tight + high
+
+    # 5) Optional anti-mud
+    if mud_db != 0.0:
+        y_out = peaking_eq_sos(y_out, sr, f0=mud_hz, gain_db=mud_db, Q=mud_Q)
+
+    # 6) Final sanitize + headroom
+    y_out = _sanitize(y_out)
+    y_out = np.clip(y_out, -1.0, 1.0)
+    y_out = peak_normalize(y_out, target_db=headroom_db)
+
+    wavfile.write(out_wav, sr, y_out.astype(np.float32))
+    return y_out
+
+
+
+
 print("DSP Primitives Layer loaded:")
 print("- Gain/level: apply_gain_db, normalize_peak, normalize_lufs, measure_peak, measure_rms")
 print("- Filters: highpass_filter, lowpass_filter, bandpass_filter, shelf_filter, peaking_eq, notch_filter, tilt_eq")

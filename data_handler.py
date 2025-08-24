@@ -254,7 +254,6 @@ class RunPaths:
     work: str
     outputs: str
     reports: str
-    premastered: str   # ✅ add this
 
 def _timestamp() -> str:
     return datetime.utcnow().strftime("%Y%m%d-%H%M%S")
@@ -269,8 +268,6 @@ def make_workspace(base_dir: str = "./postmix_runs", project: str = "default", s
         work=os.path.join(root, "work"),
         outputs=os.path.join(root, "outputs"),
         reports=os.path.join(root, "reports"),
-        premastered=os.path.join(root, "premastered"),  # ✅ add this
-
     )
     for p in asdict(paths).values():
         os.makedirs(p, exist_ok=True)
