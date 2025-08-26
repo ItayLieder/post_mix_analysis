@@ -232,8 +232,23 @@ class LocalMasterProvider(MasteringProvider):
         try:
             validate_audio(audio, f"mastering input for {style} style")
             
-            # Pre-process: normalize to safe level
-            processed = normalize_true_peak(audio, sr, target_dbtp=-2.5)
+            # Check input level and normalize more conservatively
+            input_peak = true_peak_db(audio, sr)
+            print(f"    Mastering input peak: {input_peak:.1f} dBTP")
+            
+            # Only normalize if input is too hot or too quiet
+            if input_peak > -3.0:
+                # Too hot - normalize down
+                processed = normalize_true_peak(audio, sr, target_dbtp=-3.5)
+                print(f"    Normalized hot input down to -3.5 dBTP")
+            elif input_peak < -12.0:
+                # Too quiet - normalize up more gently
+                processed = normalize_true_peak(audio, sr, target_dbtp=-6.0)
+                print(f"    Normalized quiet input up to -6.0 dBTP")
+            else:
+                # Good level already - just copy
+                processed = audio.copy()
+                print(f"    Input level good - no pre-normalization applied")
             
             # Apply style-specific processing using config values
             if style == "warm":
@@ -274,15 +289,24 @@ class LocalMasterProvider(MasteringProvider):
             # Apply "glue" compression via parallel limiting
             if style == "optimized_youtube":
                 # More aggressive limiting for YouTube optimization
-                limited = _lookahead_limiter(processed, sr, ceiling_dbfs=-0.8)  # Tighter ceiling
+                limited = _lookahead_limiter(processed, sr, ceiling_dbfs=-1.5)  # More conservative ceiling
                 processed = (1.0 - glue_amount) * processed + glue_amount * limited
-                # Final peak control with tighter true peak for YouTube's AAC codec
-                processed = normalize_true_peak(processed, sr, target_dbtp=-1.5)  # Safer for AAC
+                # Final peak control with safer true peak for YouTube's AAC codec
+                final_peak = true_peak_db(processed, sr)
+                if final_peak > -2.0:  # Only normalize if too hot
+                    processed = normalize_true_peak(processed, sr, target_dbtp=-2.0)
+                    print(f"    Applied final YouTube normalization to -2.0 dBTP")
             else:
-                limited = _lookahead_limiter(processed, sr, ceiling_dbfs=-1.2)
+                limited = _lookahead_limiter(processed, sr, ceiling_dbfs=-2.0)  # More conservative ceiling
                 processed = (1.0 - glue_amount) * processed + glue_amount * limited
-                # Final peak control
-                processed = normalize_true_peak(processed, sr, target_dbtp=CONFIG.audio.render_peak_target_dbfs)
+                # Final peak control - only if needed
+                final_peak = true_peak_db(processed, sr)
+                target_peak = CONFIG.audio.render_peak_target_dbfs
+                if final_peak > target_peak + 0.5:  # Only normalize if significantly over target
+                    processed = normalize_true_peak(processed, sr, target_dbtp=target_peak)
+                    print(f"    Applied final normalization to {target_peak:.1f} dBTP")
+                else:
+                    print(f"    Skipped final normalization - peak at {final_peak:.1f} dBTP is acceptable")
             
             params = {
                 "style": style,
@@ -355,18 +379,19 @@ class MasteringOrchestrator:
     def run(self, 
             premaster_path: str,
             providers: List[MasteringProvider],
-            styles: List[Tuple[str, float]],
+            styles: Optional[List[Tuple[str, float]]] = None,
             out_tag: str = "master",
-            level_match_preview_lufs: Optional[float] = None) -> List[MasterResult]:
+            level_match_preview_lufs: Optional[float] = -14.0) -> List[MasterResult]:
         """
         Run mastering across all provider/style combinations.
+        Creates a folder with 8 files: 4 mastering styles (loud, neutral, warm, bright) × 2 versions (regular + -14 LUFS).
         
         Args:
             premaster_path: Path to pre-mastered audio file
             providers: List of mastering providers to use
-            styles: List of (style_name, strength) tuples
+            styles: List of (style_name, strength) tuples (if None, uses default 4 styles)
             out_tag: Output directory name
-            level_match_preview_lufs: If set, create level-matched preview copies
+            level_match_preview_lufs: Target LUFS for level-matched versions (default: -14.0)
             
         Returns:
             List of MasterResult objects
@@ -374,13 +399,28 @@ class MasteringOrchestrator:
         if not os.path.exists(premaster_path):
             raise FileNotFoundError(f"Premaster file not found: {premaster_path}")
         
+        # Default to the 4 standard mastering styles if not specified
+        if styles is None:
+            styles = [
+                ("loud", 0.7),     # Loud mastering with 70% strength
+                ("neutral", 0.5),  # Neutral mastering with 50% strength
+                ("warm", 0.6),     # Warm mastering with 60% strength
+                ("bright", 0.6)    # Bright mastering with 60% strength
+            ]
+        
         results = []
-        output_dir = os.path.join(self.paths.outputs, out_tag)
+        
+        # Create input-specific folder for this master
+        input_name = os.path.splitext(os.path.basename(premaster_path))[0]
+        output_dir = os.path.join(self.paths.outputs, out_tag, input_name)
         os.makedirs(output_dir, exist_ok=True)
+        
+        print(f"🎭 Creating mastered folder: {input_name}/ (8 files: 4 styles × 2 versions)")
         
         for provider in providers:
             for style, strength in styles:
                 try:
+                    # Process with automatic -14 LUFS version creation
                     result = self._process_single_job(
                         provider, premaster_path, style, strength, 
                         output_dir, out_tag, level_match_preview_lufs
@@ -391,27 +431,39 @@ class MasteringOrchestrator:
                     print(f"Error processing {provider.name}/{style}: {e}")
                     continue
         
+        print(f"  ✅ Created master folder: {input_name}/ with {len(results)} styles × 2 versions = {len(results) * 2} files")
+        
         return results
     
     def run_all_variants(self,
                         variant_metadata: List[Dict[str, Any]],
                         providers: List[MasteringProvider],
-                        styles: List[Tuple[str, float]],
+                        styles: Optional[List[Tuple[str, float]]] = None,
                         out_tag: str = "masters",
-                        level_match_preview_lufs: Optional[float] = None) -> Dict[str, List[MasterResult]]:
+                        level_match_preview_lufs: Optional[float] = -14.0) -> Dict[str, List[MasterResult]]:
         """
         Run mastering for ALL variants, creating subfolders for each variant.
+        Each variant folder will contain 8 files: 4 mastering styles × 2 versions (regular + -14 LUFS).
         
         Args:
             variant_metadata: List of variant metadata from RenderEngine.commit_variants()
             providers: List of mastering providers to use
-            styles: List of (style_name, strength) tuples
+            styles: List of (style_name, strength) tuples (if None, uses default 4 styles)
             out_tag: Base output directory name
-            level_match_preview_lufs: If set, create level-matched preview copies
+            level_match_preview_lufs: Target LUFS for level-matched versions (default: -14.0)
             
         Returns:
             Dict mapping variant names to their mastered results
         """
+        # Default to the 4 standard mastering styles if not specified
+        if styles is None:
+            styles = [
+                ("loud", 0.7),     # Loud mastering with 70% strength
+                ("neutral", 0.5),  # Neutral mastering with 50% strength
+                ("warm", 0.6),     # Warm mastering with 60% strength
+                ("bright", 0.6)    # Bright mastering with 60% strength
+            ]
+        
         all_results = {}
         base_output_dir = os.path.join(self.paths.outputs, out_tag)
         os.makedirs(base_output_dir, exist_ok=True)
@@ -447,20 +499,29 @@ class MasteringOrchestrator:
                         continue
             
             all_results[variant_name] = variant_results
-            print(f"  ✅ Created {len(variant_results)} mastered versions for {variant_name}")
+            print(f"  ✅ Created {len(variant_results)} mastered styles (8 files) for {variant_name}")
         
-        total_files = sum(len(results) for results in all_results.values())
-        print(f"\n🎉 Successfully created {total_files} total mastered files across {len(all_results)} variants")
+        total_styles = sum(len(results) for results in all_results.values())
+        total_files = total_styles * 2  # Each style has regular + -14 LUFS version
+        print(f"\n🎉 Successfully created {total_files} total files ({total_styles} styles × 2 versions) across {len(all_results)} variants")
         
         return all_results
     
     def _process_variant_job(self, provider: MasteringProvider, variant_path: str,
-                           style: str, strength: float, output_dir: str, out_tag: str,
+                           style: str, strength: float, base_output_dir: str, out_tag: str,
                            level_match_preview_lufs: Optional[float], 
                            variant_name: str) -> Optional[MasterResult]:
         """Process a single mastering job for a specific variant."""
-        job_name = f"{provider.name}_{style}_{int(round(strength*100))}"
-        out_path = os.path.join(output_dir, f"{job_name}.wav")
+        # Extract variant file name
+        variant_file_name = os.path.splitext(os.path.basename(variant_path))[0]
+        
+        # Create style-specific folder
+        style_folder = os.path.join(base_output_dir, style)
+        os.makedirs(style_folder, exist_ok=True)
+        
+        # File path within style folder
+        job_name = f"{style}"
+        out_path = os.path.join(style_folder, f"{variant_file_name}.wav")
         
         # Create request
         request = MasterRequest(variant_path, style=style, strength=strength)
@@ -483,10 +544,10 @@ class MasteringOrchestrator:
             **result.params
         }, stage=f"{variant_name}__{job_name}")
         
-        # Create level-matched preview if requested
+        # Always create -14 LUFS version in same style folder
         if level_match_preview_lufs is not None:
-            self._create_variant_level_matched_preview(
-                result, output_dir, job_name, level_match_preview_lufs, out_tag, variant_name
+            self._create_variant_level_matched_version(
+                result, style_folder, variant_file_name, level_match_preview_lufs, out_tag, variant_name
             )
         
         return result
@@ -495,8 +556,9 @@ class MasteringOrchestrator:
                            style: str, strength: float, output_dir: str, out_tag: str,
                            level_match_preview_lufs: Optional[float]) -> Optional[MasterResult]:
         """Process a single mastering job."""
-        job_name = f"{provider.name}_{style}_{int(round(strength*100))}"
-        out_path = os.path.join(output_dir, f"{job_name}.wav")
+        # Regular version path (directly in master folder)
+        job_name = f"{style}"
+        out_path = os.path.join(output_dir, f"{style}.wav")
         
         # Create request
         request = MasterRequest(premaster_path, style=style, strength=strength)
@@ -510,7 +572,7 @@ class MasteringOrchestrator:
         if not result:
             return None
         
-        # Register artifact
+        # Register artifact for regular version
         register_artifact(self.manifest, result.out_path, kind=out_tag, params={
             "provider": result.provider,
             "style": result.style,
@@ -518,10 +580,10 @@ class MasteringOrchestrator:
             **result.params
         }, stage=job_name)
         
-        # Create level-matched preview if requested
+        # Always create level-matched -14 LUFS version in the same master folder
         if level_match_preview_lufs is not None:
-            self._create_level_matched_preview(
-                result, output_dir, job_name, level_match_preview_lufs, out_tag
+            self._create_level_matched_version(
+                result, output_dir, style, level_match_preview_lufs, out_tag
             )
         
         return result
@@ -554,85 +616,99 @@ class MasteringOrchestrator:
             print(f"Provider {provider.name} not fully implemented")
             return None
     
-    def _create_level_matched_preview(self, result: MasterResult, output_dir: str,
-                                    job_name: str, target_lufs: float, out_tag: str):
-        """Create a level-matched preview copy for A/B comparison."""
+    def _create_level_matched_version(self, result: MasterResult, master_folder: str,
+                                    style: str, target_lufs: float, out_tag: str):
+        """Create a level-matched -14 LUFS version for streaming platforms."""
         try:
             # Load processed audio
             audio, sr = sf.read(result.out_path)
             
-            # Simple LUFS approximation
-            mono = audio if audio.ndim == 1 else np.mean(audio, axis=1)
+            # More accurate LUFS measurement using existing analysis functions
+            from analysis import analyze_audio_array
+            analysis = analyze_audio_array(audio, sr)
+            current_lufs = analysis.lufs_integrated
             
-            # K-weighting approximation using config values
-            sos_hp = signal.butter(2, CONFIG.analysis.k_weight_hp_freq/(sr*0.5), btype='highpass', output='sos')
-            mono_weighted = signal.sosfilt(sos_hp, mono)
-            
-            # Estimate current LUFS using config offset
-            mean_square = np.mean(mono_weighted**2)
-            current_lufs = CONFIG.audio.lufs_bs1770_offset + 10 * np.log10(max(1e-12, mean_square))
-            
-            # Apply level matching
+            # Calculate level matching gain
             gain_db = target_lufs - current_lufs
+            
+            # Apply reasonable limits for safety
+            if abs(gain_db) > 20.0:
+                print(f"      Large LUFS adjustment: {gain_db:+.1f} dB")
+                gain_db = np.clip(gain_db, -20.0, 20.0)
+            
+            # Apply gain
             level_matched = (audio * db_to_linear(gain_db)).astype(np.float32)
             
-            # Ensure safe peak levels
-            level_matched = normalize_true_peak(level_matched, sr, target_dbtp=CONFIG.audio.render_peak_target_dbfs)
+            # Check for clipping and apply soft limiting if needed
+            peak = np.max(np.abs(level_matched))
+            if peak > 0.99:
+                # Apply soft limiting to prevent clipping
+                level_matched = np.clip(level_matched, -0.99, 0.99)
+                print(f"      Applied soft limiting to prevent clipping")
             
-            # Save preview
-            preview_path = os.path.join(output_dir, f"{job_name}__LM{int(target_lufs)}LUFS.wav")
-            sf.write(preview_path, level_matched, sr, subtype=result.bit_depth)
+            print(f"      {result.style} -14 LUFS: {current_lufs:.1f} → {target_lufs:.1f} LUFS (gain: {gain_db:+.1f} dB)")
             
-            # Register preview artifact
-            register_artifact(self.manifest, preview_path, kind=f"{out_tag}_preview", params={
+            # Save -14 LUFS version in the same master folder
+            lufs_path = os.path.join(master_folder, f"{style}_-14LUFS.wav")
+            sf.write(lufs_path, level_matched, sr, subtype=result.bit_depth)
+            
+            # Register -14 LUFS artifact
+            register_artifact(self.manifest, lufs_path, kind=f"{out_tag}_lufs", params={
                 "provider": result.provider,
                 "style": result.style, 
                 "strength": result.strength,
                 "level_matched_lufs": target_lufs,
                 "gain_applied_db": round(gain_db, 2)
-            }, stage=f"{job_name}__preview")
+            }, stage=f"{result.style}__-14LUFS")
             
         except Exception as e:
-            raise MasteringError(f"Failed to create level-matched preview: {e}")
+            raise MasteringError(f"Failed to create -14 LUFS version: {e}")
     
-    def _create_variant_level_matched_preview(self, result: MasterResult, output_dir: str,
-                                            job_name: str, target_lufs: float, out_tag: str, variant_name: str):
-        """Create a level-matched preview copy for A/B comparison for a specific variant."""
+    def _create_variant_level_matched_version(self, result: MasterResult, style_folder: str,
+                                            variant_file_name: str, target_lufs: float, out_tag: str, variant_name: str):
+        """Create a level-matched -14 LUFS version for a specific variant."""
         try:
             # Load processed audio
             audio, sr = sf.read(result.out_path)
             
-            # Simple LUFS approximation
-            mono = audio if audio.ndim == 1 else np.mean(audio, axis=1)
+            # More accurate LUFS measurement using existing analysis functions
+            from analysis import analyze_audio_array
+            analysis = analyze_audio_array(audio, sr)
+            current_lufs = analysis.lufs_integrated
             
-            # K-weighting approximation using config values
-            sos_hp = signal.butter(2, CONFIG.analysis.k_weight_hp_freq/(sr*0.5), btype='highpass', output='sos')
-            mono_weighted = signal.sosfilt(sos_hp, mono)
-            
-            # Estimate current LUFS using config offset
-            mean_square = np.mean(mono_weighted**2)
-            current_lufs = CONFIG.audio.lufs_bs1770_offset + 10 * np.log10(max(1e-12, mean_square))
-            
-            # Apply level matching
+            # Calculate level matching gain
             gain_db = target_lufs - current_lufs
+            
+            # Apply reasonable limits for safety
+            if abs(gain_db) > 20.0:
+                print(f"      Large LUFS adjustment: {gain_db:+.1f} dB")
+                gain_db = np.clip(gain_db, -20.0, 20.0)
+            
+            # Apply gain
             level_matched = (audio * db_to_linear(gain_db)).astype(np.float32)
             
-            # Ensure safe peak levels
-            level_matched = normalize_true_peak(level_matched, sr, target_dbtp=CONFIG.audio.render_peak_target_dbfs)
+            # Check for clipping and apply soft limiting if needed
+            peak = np.max(np.abs(level_matched))
+            if peak > 0.99:
+                # Apply soft limiting to prevent clipping
+                level_matched = np.clip(level_matched, -0.99, 0.99)
+                print(f"      Applied soft limiting to prevent clipping")
             
-            # Save preview
-            preview_path = os.path.join(output_dir, f"{job_name}__LM{int(target_lufs)}LUFS.wav")
-            sf.write(preview_path, level_matched, sr, subtype=result.bit_depth)
+            print(f"      {result.style} -14 LUFS: {current_lufs:.1f} → {target_lufs:.1f} LUFS (gain: {gain_db:+.1f} dB)")
             
-            # Register preview artifact with variant context
-            register_artifact(self.manifest, preview_path, kind=f"{out_tag}_variant_preview", params={
+            # Save -14 LUFS version in same style folder
+            lufs_path = os.path.join(style_folder, f"{variant_file_name}_-14LUFS.wav")
+            sf.write(lufs_path, level_matched, sr, subtype=result.bit_depth)
+            
+            # Register -14 LUFS artifact with variant context
+            register_artifact(self.manifest, lufs_path, kind=f"{out_tag}_variant_lufs", params={
                 "provider": result.provider,
                 "style": result.style, 
                 "strength": result.strength,
                 "variant_name": variant_name,
                 "level_matched_lufs": target_lufs,
                 "gain_applied_db": round(gain_db, 2)
-            }, stage=f"{variant_name}__{job_name}__preview")
+            }, stage=f"{variant_name}__{style}__-14LUFS")
             
         except Exception as e:
-            raise MasteringError(f"Failed to create variant level-matched preview: {e}")
+            raise MasteringError(f"Failed to create variant -14 LUFS version: {e}")

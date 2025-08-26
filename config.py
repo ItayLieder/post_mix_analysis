@@ -203,6 +203,39 @@ class WorkspaceConfig:
         return os.getenv('POST_MIX_WORKSPACE_ROOT', self.workspace_root)
 
 
+@dataclass
+class PipelineConfig:
+    """Processing pipeline mode configuration."""
+    
+    # Processing mode options
+    SINGLE_FILE = "single_file"
+    STEM_MASTERING = "stem_mastering"
+    
+    # Default processing mode
+    default_mode: str = SINGLE_FILE
+    
+    # Stem mastering settings
+    stem_required_categories: list = field(default_factory=lambda: ["music"])  # At least music stem required
+    stem_optional_categories: list = field(default_factory=lambda: ["drums", "bass", "vocals"])
+    
+    # Stem combination variants to generate
+    stem_combinations: list = field(default_factory=lambda: [
+        ("Stem_PunchyMix", "punchy"),
+        ("Stem_WideAndOpen", "wide"), 
+        ("Stem_TightAndControlled", "tight"),
+        ("Stem_Aggressive", "aggressive"),
+        ("Stem_Balanced", "natural")
+    ])
+    
+    def get_processing_mode(self) -> str:
+        """Get processing mode with environment variable override."""
+        return os.getenv('POST_MIX_PROCESSING_MODE', self.default_mode)
+    
+    def is_stem_mode(self) -> bool:
+        """Check if stem mastering mode is enabled."""
+        return self.get_processing_mode() == self.STEM_MASTERING
+
+
 from dataclasses import dataclass, field
 
 @dataclass
@@ -216,6 +249,7 @@ class GlobalConfig:
     streaming: StreamingConfig = field(default_factory=StreamingConfig)
     reporting: ReportingConfig = field(default_factory=ReportingConfig)
     workspace: WorkspaceConfig = field(default_factory=WorkspaceConfig)
+    pipeline: PipelineConfig = field(default_factory=PipelineConfig)
     
     @classmethod
     def load_from_env(cls) -> 'GlobalConfig':
