@@ -78,6 +78,8 @@ PRESETS: Dict[str, DialState] = {
     # Aggressive variants (from penalty_simulator notebook)
     "Aggressive Bass":  DialState(bass=65, punch=20, clarity=12, air=10, width=8),
     "Aggressive Punch": DialState(bass=28, punch=75, clarity=18, air=15, width=10),
+    # Platform-optimized variants
+    "optimized_youtube": DialState(bass=35, punch=45, clarity=32, air=25, width=12),
 }
 
 def list_presets() -> List[str]:
@@ -335,6 +337,10 @@ def recommend_mastering_styles_from_metrics(rep) -> List[Tuple[str, float, str]]
     # If very dynamic & quiet → try "loud" moderately
     if crest > 16 and lufs < -18:
         out.append(("loud", 0.55, f"Dynamic ({crest:.1f} dB) & quiet ({lufs:.1f} LUFS) → more forward"))
+    
+    # YouTube optimization for loud content that needs penalty resistance
+    if lufs > -16:
+        out.append(("optimized_youtube", 0.65, f"Loud content ({lufs:.1f} LUFS) → YouTube penalty resistance"))
 
     # Always keep a neutral baseline
     if not any(s == "neutral" for s,_,_ in out):

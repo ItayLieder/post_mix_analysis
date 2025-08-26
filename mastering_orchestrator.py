@@ -251,6 +251,20 @@ class LocalMasterProvider(MasteringProvider):
                 processed = _lowshelf(processed, sr, CONFIG.mastering.neutral_low_shelf_hz, 0.8 * strength)
                 glue_amount = CONFIG.mastering.loud_glue_base + CONFIG.mastering.loud_glue_scale * strength
                 
+            elif style == "optimized_youtube":
+                # YouTube optimization: midrange focus, controlled bass, aggressive limiting
+                # Midrange presence boost for phone speakers and perceived loudness
+                processed = _peaking_eq(processed, sr, 2500.0, 1.8 * strength, Q=0.8)  # Midrange presence
+                processed = _peaking_eq(processed, sr, 4000.0, 1.2 * strength, Q=1.2)  # Upper midrange clarity
+                # Controlled low-end to avoid wasting headroom
+                processed = _peaking_eq(processed, sr, 60.0, -0.8 * strength, Q=0.7)   # Tighten sub-bass
+                processed = _lowshelf(processed, sr, 120.0, 0.6 * strength)            # Controlled bass shelf
+                # High-frequency management for AAC codec survival
+                processed = _highshelf(processed, sr, 8000.0, 0.8 * strength)          # Gentle high shelf
+                processed = _peaking_eq(processed, sr, 12000.0, -0.4 * strength, Q=1.0) # De-harsh for codec
+                # More aggressive glue for YouTube's harsh penalty (-14 LUFS target → aim for -13 LUFS)
+                glue_amount = 0.25 + 0.35 * strength  # More aggressive than other styles
+                
             else:  # neutral or default
                 processed = _highshelf(processed, sr, CONFIG.mastering.neutral_high_shelf_hz, 0.8 * strength)
                 processed = _lowshelf(processed, sr, CONFIG.mastering.neutral_low_shelf_hz, 0.5 * strength)
@@ -258,11 +272,17 @@ class LocalMasterProvider(MasteringProvider):
                 style = "neutral"
             
             # Apply "glue" compression via parallel limiting
-            limited = _lookahead_limiter(processed, sr, ceiling_dbfs=-1.2)
-            processed = (1.0 - glue_amount) * processed + glue_amount * limited
-            
-            # Final peak control
-            processed = normalize_true_peak(processed, sr, target_dbtp=CONFIG.audio.render_peak_target_dbfs)
+            if style == "optimized_youtube":
+                # More aggressive limiting for YouTube optimization
+                limited = _lookahead_limiter(processed, sr, ceiling_dbfs=-0.8)  # Tighter ceiling
+                processed = (1.0 - glue_amount) * processed + glue_amount * limited
+                # Final peak control with tighter true peak for YouTube's AAC codec
+                processed = normalize_true_peak(processed, sr, target_dbtp=-1.5)  # Safer for AAC
+            else:
+                limited = _lookahead_limiter(processed, sr, ceiling_dbfs=-1.2)
+                processed = (1.0 - glue_amount) * processed + glue_amount * limited
+                # Final peak control
+                processed = normalize_true_peak(processed, sr, target_dbtp=CONFIG.audio.render_peak_target_dbfs)
             
             params = {
                 "style": style,
