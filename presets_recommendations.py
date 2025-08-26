@@ -31,18 +31,53 @@ except NameError:
 # ---------- 1) Preset Library (you can tweak these) ----------
 
 PRESETS: Dict[str, DialState] = {
-    # Gentle, safe polish
-    "Balanced Gentle":   DialState(bass=15, punch=15, clarity=10, air=10, width=5),
-    # Bass-forward modern pop/hip-hop
-    "Modern Low-End":    DialState(bass=38, punch=28, clarity=8,  air=8,  width=8),
-    # Tight low end for dance/electronic
-    "Tight & Punchy":    DialState(bass=28, punch=42, clarity=12, air=10, width=6),
-    # De-mud + sparkle for dense guitars/vocals
-    "Clarity & Air":     DialState(bass=10, punch=12, clarity=28, air=28, width=6),
-    # Wider image, modest tone moves
-    "Wide Pop":          DialState(bass=18, punch=14, clarity=10, air=16, width=18),
     # Minimal changes (QA/reference)
     "Transparent":       DialState(bass=0,  punch=0,  clarity=0,  air=0,  width=0),
+    # Gentle, safe polish
+    "Balanced Gentle":   DialState(bass=15, punch=15, clarity=10, air=10, width=5),
+    # Bass-focused variants
+    "Bassy":            DialState(bass=45, punch=12, clarity=8,  air=6,  width=5),
+    "Deep Bass":        DialState(bass=55, punch=8,  clarity=5,  air=5,  width=4),
+    "Modern Low-End":   DialState(bass=38, punch=28, clarity=8,  air=8,  width=8),
+    # Punch-focused variants
+    "Punchy":           DialState(bass=18, punch=48, clarity=15, air=12, width=8),
+    "Tight & Punchy":   DialState(bass=28, punch=42, clarity=12, air=10, width=6),
+    "Aggressive Punch": DialState(bass=22, punch=58, clarity=18, air=10, width=6),
+    # Clarity-focused variants
+    "Clear":            DialState(bass=8,  punch=15, clarity=38, air=15, width=8),
+    "Clarity & Air":    DialState(bass=10, punch=12, clarity=28, air=28, width=6),
+    "Crystal Clear":    DialState(bass=5,  punch=18, clarity=45, air=22, width=10),
+    # Air/brightness variants
+    "Airy":             DialState(bass=12, punch=15, clarity=18, air=35, width=8),
+    "Bright":           DialState(bass=8,  punch=12, clarity=22, air=42, width=6),
+    "Sparkle":          DialState(bass=6,  punch=10, clarity=25, air=48, width=8),
+    # Width/stereo variants
+    "Wide":             DialState(bass=15, punch=12, clarity=12, air=15, width=28),
+    "Wide Pop":         DialState(bass=18, punch=14, clarity=10, air=16, width=18),
+    "Ultra Wide":       DialState(bass=12, punch=10, clarity=8,  air=12, width=38),
+    # Combination variants
+    "Warm & Wide":      DialState(bass=32, punch=15, clarity=8,  air=10, width=22),
+    "Punchy & Bright":  DialState(bass=15, punch=35, clarity=20, air=32, width=8),
+    "Bass & Punch":     DialState(bass=42, punch=38, clarity=10, air=8,  width=6),
+    "Clear & Wide":     DialState(bass=10, punch=12, clarity=32, air=18, width=25),
+    # Extreme variants
+    "Maximum Bass":     DialState(bass=70, punch=5,  clarity=2,  air=2,  width=3),
+    "Maximum Punch":    DialState(bass=12, punch=70, clarity=25, air=15, width=10),
+    "Maximum Clarity":  DialState(bass=3,  punch=20, clarity=70, air=35, width=12),
+    "Maximum Air":      DialState(bass=5,  punch=8,  clarity=30, air=70, width=10),
+    "Maximum Width":    DialState(bass=8,  punch=8,  clarity=8,  air=12, width=70),
+    # Genre-specific variants
+    "Hip Hop":          DialState(bass=48, punch=35, clarity=10, air=8,  width=5),
+    "Rock":             DialState(bass=25, punch=40, clarity=22, air=18, width=12),
+    "Electronic":       DialState(bass=35, punch=45, clarity=15, air=20, width=15),
+    "Jazz":             DialState(bass=20, punch=15, clarity=25, air=25, width=20),
+    "Classical":        DialState(bass=10, punch=8,  clarity=20, air=30, width=25),
+    "Vocal":            DialState(bass=12, punch=18, clarity=35, air=28, width=15),
+    "Acoustic":         DialState(bass=18, punch=12, clarity=22, air=25, width=18),
+    "Metal":            DialState(bass=30, punch=50, clarity=20, air=15, width=8),
+    # Aggressive variants (from penalty_simulator notebook)
+    "Aggressive Bass":  DialState(bass=65, punch=20, clarity=12, air=10, width=8),
+    "Aggressive Punch": DialState(bass=28, punch=75, clarity=18, air=15, width=10),
 }
 
 def list_presets() -> List[str]:
@@ -239,11 +274,43 @@ def build_premaster_plan_from_recs(
 ) -> List[Tuple[str, DialState]]:
     """
     Convert top-N recommendations to (name, DialState) tuples for RenderEngine.commit_variants().
+    This is kept for backward compatibility, but use build_all_variants_plan() for comprehensive variants.
     """
     planned: List[Tuple[str, DialState]] = []
     for i, r in enumerate(recs[:limit], start=1):
         tag = f"{prefix}{i}_{r.name.replace(' ', '')}"
         planned.append((tag, r.dials))
+    return planned
+
+def build_all_variants_plan(
+    recs: List[Recommendation],
+    prefix: str = "PM",
+    top_recommendations: int = 3
+) -> List[Tuple[str, DialState]]:
+    """
+    Generate ALL possible variants including all presets and all recommendations.
+    Top recommendations get "_recommended" suffix.
+    Returns (name, DialState) tuples for RenderEngine.commit_variants().
+    """
+    planned: List[Tuple[str, DialState]] = []
+    
+    # 1. Add all preset variants first
+    for preset_name, preset_dials in PRESETS.items():
+        # Clean up name for filename
+        clean_name = preset_name.replace(' ', '').replace('&', 'And')
+        tag = f"{prefix}_{clean_name}"
+        planned.append((tag, preset_dials))
+    
+    # 2. Add all recommendation variants
+    for i, r in enumerate(recs, start=1):
+        clean_name = r.name.replace(' ', '').replace('&', 'And')
+        # Mark top recommendations with "_recommended" suffix
+        if i <= top_recommendations:
+            tag = f"{prefix}_{clean_name}_recommended"
+        else:
+            tag = f"{prefix}_{clean_name}"
+        planned.append((tag, r.dials))
+    
     return planned
 
 def recommend_mastering_styles_from_metrics(rep) -> List[Tuple[str, float, str]]:
@@ -296,6 +363,7 @@ def recommendation_summary(recs: List[Recommendation]) -> str:
 print("Presets & Recommendations layer loaded:")
 print("- PRESETS dict, list_presets(), get_preset(name)")
 print("- recommend_from_analysis(rep) → [Recommendation]")
-print("- build_premaster_plan_from_recs(recs, limit)")
+print("- build_premaster_plan_from_recs(recs, limit) [legacy]")
+print("- build_all_variants_plan(recs, prefix, top_recommendations) [comprehensive]")
 print("- recommend_mastering_styles_from_metrics(rep)")
 print("- recommendation_summary(recs)")

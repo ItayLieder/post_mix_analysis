@@ -258,10 +258,22 @@ class RunPaths:
 def _timestamp() -> str:
     return datetime.utcnow().strftime("%Y%m%d-%H%M%S")
 
-def make_workspace(base_dir: str = "./postmix_runs", project: str = "default", slug: Optional[str] = None) -> RunPaths:
+def make_workspace(base_dir: str = None, project: str = "default", slug: Optional[str] = None) -> RunPaths:
+    """Create a timestamped workspace directory using configuration."""
+    # Import here to avoid circular imports
+    try:
+        from config import CONFIG
+        default_base = CONFIG.workspace.get_workspace_root()
+    except ImportError:
+        default_base = "./postmix_runs"  # Fallback if config not available
+    
+    if base_dir is None:
+        base_dir = default_base
+    
     ts = _timestamp()
     slug_part = f"_{slug}" if slug else ""
     root = os.path.abspath(os.path.join(base_dir, f"{project}_{ts}{slug_part}"))
+    
     paths = RunPaths(
         root=root,
         inputs=os.path.join(root, "inputs"),
@@ -269,8 +281,11 @@ def make_workspace(base_dir: str = "./postmix_runs", project: str = "default", s
         outputs=os.path.join(root, "outputs"),
         reports=os.path.join(root, "reports"),
     )
+    
+    # Create all directories
     for p in asdict(paths).values():
         os.makedirs(p, exist_ok=True)
+    
     print(f"Workspace created at: {paths.root}")
     return paths
 

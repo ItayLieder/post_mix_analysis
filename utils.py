@@ -1,26 +1,25 @@
-
-
 # === Utility: exports + true-peak guard ===
-import os, numpy as np, soundfile as sf
+import os
+import numpy as np
+import soundfile as sf
 from dataclasses import dataclass
+from config import CONFIG
+from audio_utils import true_peak_db, db_to_linear, sanitize_audio
 
-# Use your existing TP approx if available; else fallback
-try:
-    true_peak_dbfs
-except NameError:
-    from scipy import signal
-    def true_peak_dbfs(x: np.ndarray, sr: int, oversample: int = 4) -> float:
-        x_os = signal.resample_poly(np.asarray(x, dtype=np.float32), oversample, 1, axis=0 if np.asarray(x).ndim>1 else 0)
-        tp = float(np.max(np.abs(x_os)))
-        return 20.0*np.log10(max(1e-12, tp))
-
-def _db_to_lin(db: float) -> float: return 10.0**(db/20.0)
-
-def save_wav_24bit(path: str, y: np.ndarray, sr: int):
-    """Always export 24-bit PCM with dirs created."""
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    sf.write(path, np.asarray(y, dtype=np.float32), int(sr), subtype="PCM_24")
-    return os.path.abspath(path)
+def save_wav_24bit(path: str, y: np.ndarray, sr: int, bit_depth: str = None):
+    """Export audio with proper bit depth and directory creation."""
+    if bit_depth is None:
+        bit_depth = CONFIG.audio.default_bit_depth
+    
+    # Ensure output directory exists
+    output_path = os.path.abspath(path)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    
+    # Sanitize and write audio
+    clean_audio = sanitize_audio(y, clip_range=CONFIG.audio.safe_clip_range)
+    sf.write(output_path, clean_audio, int(sr), subtype=bit_depth)
+    
+    return output_path
 
 @dataclass
 class TPGuardResult:
@@ -30,48 +29,47 @@ class TPGuardResult:
     out_dbtp: float
     ceiling_db: float
 
-def safe_true_peak(y: np.ndarray, sr: int, ceiling_db: float = -1.0) -> TPGuardResult:
-    """Trim overall gain so true-peak ≤ ceiling (no limiting)."""
-    tp_in = true_peak_dbfs(y, sr, oversample=4)
-    gain_db = ceiling_db - tp_in
-    y2 = (np.asarray(y, dtype=np.float32) * _db_to_lin(gain_db)).astype(np.float32)
-    tp_out = true_peak_dbfs(y2, sr, oversample=4)
-    return TPGuardResult(out=y2, gain_db=gain_db, in_dbtp=tp_in, out_dbtp=tp_out, ceiling_db=ceiling_db)
+def safe_true_peak(y: np.ndarray, sr: int, ceiling_db: float = None) -> TPGuardResult:
+    """Apply gain reduction to keep true peak below ceiling (no limiting)."""
+    if ceiling_db is None:
+        ceiling_db = CONFIG.audio.true_peak_ceiling_db
+    
+    # Clean input audio
+    clean_audio = sanitize_audio(y)
+    
+    # Measure input true peak
+    input_tp = true_peak_db(clean_audio, sr, oversample=CONFIG.audio.oversample_factor)
+    
+    # Calculate required gain
+    gain_db = ceiling_db - input_tp
+    
+    # Apply gain
+    output_audio = (clean_audio * db_to_linear(gain_db)).astype(np.float32)
+    
+    # Measure output true peak for verification
+    output_tp = true_peak_db(output_audio, sr, oversample=CONFIG.audio.oversample_factor)
+    
+    return TPGuardResult(
+        out=output_audio, 
+        gain_db=gain_db, 
+        in_dbtp=input_tp, 
+        out_dbtp=output_tp, 
+        ceiling_db=ceiling_db
+    )
 
-# === Global config + validators ===
-from dataclasses import dataclass, asdict
-import numpy as np
+# === Audio validation ===
+from audio_utils import validate_audio as _validate_audio
 
-@dataclass
-class GlobalConfig:
-    # I/O
-    default_bit_depth: str = "PCM_24"
-    # Prep
-    prep_hpf_hz: float = 20.0
-    prep_peak_target_dbfs: float = -6.0
-    # Rendering
-    render_peak_target_dbfs: float = -1.0
-    # Streaming sim
-    tp_ceiling_db: float = -1.0
-    # Reporting
-    preview_seconds: int = 60
-    nfft: int = 1<<16
-
-CFG = GlobalConfig()
-
-class InputError(Exception): pass
+class InputError(Exception): 
+    """Raised when input audio data is invalid."""
+    pass
 
 def ensure_audio_valid(x: np.ndarray, name: str = "audio"):
-    if not isinstance(x, np.ndarray):
-        raise InputError(f"{name}: expected numpy array, got {type(x)}")
-    if x.ndim not in (1,2):
-        raise InputError(f"{name}: expected 1D (mono) or 2D (stereo), got shape {x.shape}")
-    if not np.isfinite(x).all():
-        raise InputError(f"{name}: contains NaN/Inf values; sanitize before processing")
-    if x.size == 0:
-        raise InputError(f"{name}: empty array")
-    if x.ndim == 2 and x.shape[1] not in (1,2):
-        raise InputError(f"{name}: expected (N,), (N,1) or (N,2); got {x.shape}")
+    """Validate audio array and raise InputError if invalid."""
+    try:
+        _validate_audio(x, name)
+    except ValueError as e:
+        raise InputError(str(e))
 
 # === Reporting helpers (enhanced HTML) ===
 import os, io, html
@@ -178,38 +176,73 @@ def _safe_copy_to_dir(src_path: str, target_dir: str):
     return dst
 
 # Rebind write_report_html to use safe copy
-def write_report_html(summary_df, deltas_df, plots, out_path, title="Post-Mix Comparison Report", extra_notes=None):
+def write_report_html(summary_df, deltas_df, plots, out_path, title=None, extra_notes=None):
+    """Write HTML comparison report with improved styling."""
     import io
-    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
-    html = io.StringIO()
-    html.write(f"<!doctype html><html><head><meta charset='utf-8'><title>{title}</title>")
-    html.write("<style>body{font-family:system-ui,Arial,sans-serif;margin:24px} h1{margin-top:0} img{max-width:100%;height:auto} table{border-collapse:collapse} th,td{border:1px solid #ddd;padding:6px} caption{margin:6px 0}</style>")
-    html.write("</head><body>")
-    html.write(f"<h1>{title}</h1>")
+    import html as html_module
+    
+    if title is None:
+        title = CONFIG.reporting.report_title
+    
+    # Create output directory
+    output_path = os.path.abspath(out_path)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    
+    # Build HTML
+    html_content = io.StringIO()
+    html_content.write(f'<!doctype html><html><head><meta charset="utf-8"><title>{html_module.escape(title)}</title>')
+    
+    # Enhanced CSS styling using config
+    html_content.write(f'''<style>
+        body {{ font-family: {CONFIG.reporting.font_family}; margin: 24px; line-height: 1.6; }}
+        h1 {{ margin-top: 0; color: #333; }}
+        h3 {{ color: #555; margin-top: 2rem; }}
+        img {{ max-width: 100%; height: auto; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }}
+        table {{ border-collapse: collapse; width: 100%; margin: 1rem 0; }}
+        th, td {{ border: 1px solid {CONFIG.reporting.table_border_color}; padding: 8px 12px; text-align: left; }}
+        th {{ background: #f8f9fa; font-weight: 600; }}
+        tr:nth-child(even) {{ background: #f8f9fa; }}
+        .notes {{ font-style: italic; color: #666; background: #f8f9fa; padding: 1rem; border-radius: 4px; margin: 1rem 0; }}
+    </style>''')
+    
+    html_content.write('</head><body>')
+    html_content.write(f'<h1>{html_module.escape(title)}</h1>')
+    
     if extra_notes:
-        html.write(f"<p><em>{extra_notes}</em></p>")
-    # tables
-    html.write(summary_df.to_html(index=False, float_format=lambda v: f"{v:.6g}"))
+        html_content.write(f'<div class="notes">{html_module.escape(extra_notes)}</div>')
+    
+    # Tables
+    html_content.write('<h3>Summary Metrics</h3>')
+    html_content.write(summary_df.to_html(index=False, float_format=lambda v: f"{v:.6g}", escape=False))
+    
     if deltas_df is not None and len(deltas_df):
-        html.write(deltas_df.to_html(index=False, float_format=lambda v: f"{v:.6g}"))
-    # plots
-    if "spectrum_png" in plots and os.path.exists(plots["spectrum_png"]):
-        html.write("<h3>Spectrum Overlay</h3>")
-        html.write(f"<img src='{os.path.basename(plots['spectrum_png'])}' alt='Spectrum Overlay'/>")
-    if "loudness_png" in plots and os.path.exists(plots["loudness_png"]):
-        html.write("<h3>Short-Term Loudness Overlay</h3>")
-        html.write(f"<img src='{os.path.basename(plots['loudness_png'])}' alt='Loudness Overlay'/>")
-    html.write("</body></html>")
-
-    with open(out_path, "w", encoding="utf-8") as f:
-        f.write(html.getvalue())
-
-    # copy assets next to HTML, but skip if already there
-    target_dir = os.path.dirname(out_path)
-    for p in plots.values():
-        if p:
-            _safe_copy_to_dir(p, target_dir)
-    return os.path.abspath(out_path)
+        html_content.write('<h3>Changes vs Reference</h3>')
+        html_content.write(deltas_df.to_html(index=False, float_format=lambda v: f"{v:.6g}"))
+    
+    # Plots
+    for plot_type, plot_path in plots.items():
+        if plot_path and os.path.exists(plot_path):
+            plot_name = {
+                'spectrum_png': 'Frequency Spectrum Comparison',
+                'loudness_png': 'Short-Term Loudness Comparison'
+            }.get(plot_type, plot_type.replace('_', ' ').title())
+            
+            html_content.write(f'<h3>{plot_name}</h3>')
+            html_content.write(f'<img src="{os.path.basename(plot_path)}" alt="{plot_name}"/>')
+    
+    html_content.write('</body></html>')
+    
+    # Write HTML file
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(html_content.getvalue())
+    
+    # Copy plot assets to same directory
+    target_dir = os.path.dirname(output_path)
+    for plot_path in plots.values():
+        if plot_path and os.path.exists(plot_path):
+            _safe_copy_to_dir(plot_path, target_dir)
+    
+    return output_path
 
 # If you use the enhanced writer, patch its copy loop too
 try:

@@ -24,6 +24,23 @@ from data_handler import *
 def _now_iso() -> str:
     return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
+def _make_json_serializable(obj):
+    """Convert numpy types and other non-serializable objects to JSON-compatible types."""
+    if isinstance(obj, dict):
+        return {k: _make_json_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [_make_json_serializable(item) for item in obj]
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif hasattr(obj, 'item'):  # numpy scalar
+        return obj.item()
+    else:
+        return obj
+
 def _mkdirp(p: str) -> str:
     os.makedirs(p, exist_ok=True); return p
 
@@ -147,17 +164,29 @@ class RunLogger:
 
     # event logging (append JSON lines)
     def log_event(self, kind: str, payload: Dict[str, Any]):
-        evt = {"ts": _now_iso(), "run_id": self.run_id, "kind": kind, **payload}
+        # Convert numpy types to JSON-serializable types
+        safe_payload = _make_json_serializable(payload)
+        evt = {"ts": _now_iso(), "run_id": self.run_id, "kind": kind, **safe_payload}
+        
+        # Ensure the log directory exists before writing
+        log_dir = os.path.dirname(self.jsonl_path)
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir, exist_ok=True)
+        
         with open(self.jsonl_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(evt, ensure_ascii=False) + "\n")
 
     # param/metric helpers
     def log_params(self, step: str, params: Dict[str, Any], code_versions: Optional[Dict[str,str]] = None):
-        digest = processing_digest(step, code_versions=code_versions or {}, params=params)
-        self.log_event("params", {"step": step, "digest": digest, "params": params, "code_versions": code_versions})
+        # Convert to JSON-safe types before processing
+        safe_params = _make_json_serializable(params)
+        digest = processing_digest(step, code_versions=code_versions or {}, params=safe_params)
+        self.log_event("params", {"step": step, "digest": digest, "params": safe_params, "code_versions": code_versions})
 
     def log_metrics(self, step: str, metrics: Dict[str, Any]):
-        self.log_event("metrics", {"step": step, "metrics": metrics})
+        # Convert numpy types to JSON-serializable types
+        safe_metrics = _make_json_serializable(metrics)
+        self.log_event("metrics", {"step": step, "metrics": safe_metrics})
 
     def log_artifact(self, kind: str, path: str, extra: Optional[Dict[str,Any]] = None):
         payload = {"kind": kind, "path": os.path.abspath(path)}
@@ -166,8 +195,14 @@ class RunLogger:
 
     # summary (overwrites)
     def write_summary(self, summary: Dict[str, Any]):
+        # Convert numpy types and ensure directory exists
+        safe_summary = _make_json_serializable(summary)
+        summary_dir = os.path.dirname(self.summary_path)
+        if not os.path.exists(summary_dir):
+            os.makedirs(summary_dir, exist_ok=True)
+            
         with open(self.summary_path, "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2, ensure_ascii=False)
+            json.dump(safe_summary, f, indent=2, ensure_ascii=False)
 
 # ---------- provenance for files & configs ----------
 

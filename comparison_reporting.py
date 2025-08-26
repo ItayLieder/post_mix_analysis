@@ -24,6 +24,25 @@ import numpy as np
 import pandas as pd
 import matplotlib
 from analysis import *
+from data_handler import register_artifact
+
+# Safe copy function to avoid SameFileError when source and dest are the same
+def _safe_copy_to_dir(src_path: str, target_dir: str):
+    """Copy src_path into target_dir unless it's already there."""
+    if not os.path.exists(src_path):
+        return None
+    dst = os.path.join(target_dir, os.path.basename(src_path))
+    try:
+        # if already same path or same inode → skip
+        if os.path.abspath(src_path) == os.path.abspath(dst) or (
+            os.path.exists(dst) and os.path.samefile(src_path, dst)
+        ):
+            return dst
+    except Exception:
+        # os.path.samefile might fail on some platforms; fall through to copy
+        pass
+    shutil.copy2(src_path, dst)
+    return dst
 
 matplotlib.rcParams["figure.dpi"] = 110
 import matplotlib.pyplot as plt
@@ -256,10 +275,11 @@ def write_report_html(
     # write HTML and copy plot assets next to it
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(html.getvalue())
-    # copy images to same folder for portability
+    # copy images to same folder for portability (safe copy to avoid SameFileError)
+    target_dir = os.path.dirname(out_path)
     for k, p in plots.items():
-        if os.path.exists(p):
-            shutil.copy2(p, os.path.join(os.path.dirname(out_path), os.path.basename(p)))
+        if p and os.path.exists(p):
+            _safe_copy_to_dir(p, target_dir)
     return os.path.abspath(out_path)
 
 # ---------- 6) One-shot bundle: metrics → plots → HTML (+ manifest) ----------
