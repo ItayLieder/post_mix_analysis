@@ -21,24 +21,79 @@ from render_engine import DialState
 
 @dataclass
 class StemSet:
-    """Container for the 4 standard stem categories"""
+    """Container for stem categories with support for detailed stems"""
+    # Main stem categories (required)
     drums: Optional[AudioBuffer] = None      # Kick, snare, hats, percussion
     bass: Optional[AudioBuffer] = None       # Bass guitar, sub bass, 808s  
     vocals: Optional[AudioBuffer] = None     # Lead vocals, backing vocals, harmonies
     music: Optional[AudioBuffer] = None      # Guitars, keys, synths, strings, other
+    
+    # Detailed stems (optional - if not provided, assumed part of main category)
+    kick: Optional[AudioBuffer] = None       # Kick drum (falls back to drums)
+    snare: Optional[AudioBuffer] = None      # Snare drum (falls back to drums)
+    hats: Optional[AudioBuffer] = None       # Hi-hats (falls back to drums)
+    backvocals: Optional[AudioBuffer] = None # Backing vocals (falls back to vocals)
+    leadvocals: Optional[AudioBuffer] = None # Lead vocals (falls back to vocals)
+    guitar: Optional[AudioBuffer] = None     # Guitar (falls back to music)
+    keys: Optional[AudioBuffer] = None       # Keys/synths (falls back to music)
+    strings: Optional[AudioBuffer] = None    # Strings (falls back to music)
+    
+    # Stem category mapping for detailed stems
+    _stem_mapping = {
+        'kick': 'drums',
+        'snare': 'drums', 
+        'hats': 'drums',
+        'backvocals': 'vocals',
+        'leadvocals': 'vocals',
+        'guitar': 'music',
+        'keys': 'music',
+        'strings': 'music'
+    }
     
     def validate(self) -> bool:
         """At minimum, require at least one stem to be present"""
         return any([self.drums, self.bass, self.vocals, self.music]) is not None
     
     def get_active_stems(self) -> List[str]:
-        """Return list of stem names that have audio data"""
+        """Return list of ALL stem names that have audio data (main + detailed)"""
+        active = []
+        # Check main categories
+        if self.drums: active.append("drums")
+        if self.bass: active.append("bass")  
+        if self.vocals: active.append("vocals")
+        if self.music: active.append("music")
+        
+        # Check detailed stems
+        detailed_stems = ['kick', 'snare', 'hats', 'backvocals', 'leadvocals', 'guitar', 'keys', 'strings']
+        for stem_name in detailed_stems:
+            if hasattr(self, stem_name) and getattr(self, stem_name) is not None:
+                active.append(stem_name)
+        
+        return active
+    
+    def get_main_stems_only(self) -> List[str]:
+        """Return list of only main stem categories that have audio data"""
         active = []
         if self.drums: active.append("drums")
         if self.bass: active.append("bass")  
         if self.vocals: active.append("vocals")
         if self.music: active.append("music")
         return active
+        
+    def get_detailed_stems_only(self) -> List[str]:
+        """Return list of only detailed stems that have audio data"""
+        active = []
+        detailed_stems = ['kick', 'snare', 'hats', 'backvocals', 'leadvocals', 'guitar', 'keys', 'strings']
+        for stem_name in detailed_stems:
+            if hasattr(self, stem_name) and getattr(self, stem_name) is not None:
+                active.append(stem_name)
+        return active
+        
+    def get_stem_category(self, stem_name: str) -> str:
+        """Get the main category for any stem (main or detailed)"""
+        if stem_name in ['drums', 'bass', 'vocals', 'music']:
+            return stem_name
+        return self._stem_mapping.get(stem_name, 'music')  # Default to music if unknown
     
     def get_total_duration(self) -> float:
         """Get the duration of the longest stem"""
@@ -101,7 +156,7 @@ STEM_COMBINATIONS: Dict[str, str] = {
 }
 
 def get_stem_variant_for_combination(stem_type: str, combination: str) -> DialState:
-    """Get the appropriate variant for a stem type in a given combination"""
+    """Get the appropriate variant for a stem type in a given combination (supports detailed stems)"""
     # Map combinations to stem variants
     combination_map = {
         "punchy": {"drums": "punchy", "bass": "tight", "vocals": "presence", "music": "focused"},
@@ -111,8 +166,30 @@ def get_stem_variant_for_combination(stem_type: str, combination: str) -> DialSt
         "natural": {"drums": "natural", "bass": "controlled", "vocals": "warm", "music": "balanced"},
     }
     
-    stem_variant = combination_map.get(combination, {}).get(stem_type, "natural")
-    return STEM_VARIANTS[stem_type].get(stem_variant, STEM_VARIANTS[stem_type]["natural"])
+    # Handle detailed stems by mapping them to their main categories
+    stem_mapping = {
+        'kick': 'drums',
+        'snare': 'drums', 
+        'hats': 'drums',
+        'backvocals': 'vocals',
+        'leadvocals': 'vocals',
+        'guitar': 'music',
+        'keys': 'music',
+        'strings': 'music'
+    }
+    
+    # Get the main category for this stem
+    main_category = stem_mapping.get(stem_type, stem_type)  # Use original if not detailed
+    
+    # Get the variant for the main category
+    stem_variant = combination_map.get(combination, {}).get(main_category, "natural")
+    
+    # Return the dial state from the main category variants
+    if main_category in STEM_VARIANTS:
+        return STEM_VARIANTS[main_category].get(stem_variant, STEM_VARIANTS[main_category]["natural"])
+    else:
+        # Fallback to drums if category not found
+        return STEM_VARIANTS["drums"]["natural"]
 
 # ============================================
 # STEM LOADING UTILITIES
@@ -120,21 +197,34 @@ def get_stem_variant_for_combination(stem_type: str, combination: str) -> DialSt
 
 def load_stem_set(stem_paths: Dict[str, str]) -> StemSet:
     """
-    Load stems from file paths
-    stem_paths: {"drums": "path/to/drums.wav", "vocals": "path/to/vocals.wav", etc.}
+    Load stems from file paths (supports both main and detailed stems)
+    stem_paths: {"drums": "path/to/drums.wav", "kick": "path/to/kick.wav", etc.}
     """
     stem_set = StemSet()
     
+    # Define all supported stem types
+    main_stems = ["drums", "bass", "vocals", "music"]
+    detailed_stems = ["kick", "snare", "hats", "backvocals", "leadvocals", "guitar", "keys", "strings"]
+    all_supported_stems = main_stems + detailed_stems
+    
     for stem_type, path in stem_paths.items():
-        if stem_type not in ["drums", "bass", "vocals", "music"]:
-            print(f"⚠️ Unknown stem type '{stem_type}', skipping...")
+        if stem_type not in all_supported_stems:
+            category = stem_set.get_stem_category(stem_type) if hasattr(stem_set, 'get_stem_category') else 'music'
+            print(f"⚠️ Unknown stem type '{stem_type}' - will be treated as '{category}' category")
             continue
             
         if path and os.path.exists(path):
             try:
                 audio_buffer = load_wav(path)
                 setattr(stem_set, stem_type, audio_buffer)
-                print(f"✅ Loaded {stem_type} stem: {audio_buffer.duration_s:.1f}s")
+                
+                # Show which category this detailed stem belongs to
+                if stem_type in detailed_stems:
+                    category = stem_set.get_stem_category(stem_type)
+                    print(f"✅ Loaded {stem_type} stem: {audio_buffer.duration_s:.1f}s (→ {category} category)")
+                else:
+                    print(f"✅ Loaded {stem_type} stem: {audio_buffer.duration_s:.1f}s")
+                    
             except Exception as e:
                 print(f"❌ Failed to load {stem_type} stem from {path}: {e}")
         else:

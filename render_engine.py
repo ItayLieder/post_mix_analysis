@@ -242,6 +242,7 @@ class StemRenderEngine:
                            opts: Optional[RenderOptions] = None) -> Dict[str, List[Dict[str, Any]]]:
         """
         Process stems with different combination approaches and save results.
+        Supports both basic dial-based processing and advanced processing chains.
         
         Args:
             base_outdir: Base output directory
@@ -252,6 +253,7 @@ class StemRenderEngine:
             Dict mapping variant names to their processing metadata
         """
         from stem_mastering import get_stem_variant_for_combination, STEM_COMBINATIONS
+        from config import CONFIG
         
         os.makedirs(base_outdir, exist_ok=True)
         all_results = {}
@@ -262,26 +264,227 @@ class StemRenderEngine:
             variant_dir = os.path.join(base_outdir, variant_name)
             os.makedirs(variant_dir, exist_ok=True)
             
-            # Process each stem with appropriate dial settings
-            stem_results = {}
-            processed_stems = {}
+            # Check variant type
+            is_advanced = combination_key.startswith("advanced:")
+            is_extreme = combination_key.startswith("extreme:")
+            is_depth = combination_key.startswith("depth:")
+            is_musical = combination_key.startswith("musical:")
+            is_hybrid = combination_key.startswith("hybrid:")
             
-            for stem_type, engine in self.stem_engines.items():
-                # Get dial settings for this stem in this combination
-                dial_state = get_stem_variant_for_combination(stem_type, combination_key)
-                
-                # Process the stem
-                stem_out_path = os.path.join(variant_dir, f"{stem_type}_processed.wav")
-                stem_metadata = engine.commit(stem_out_path, dial_state, opts)
-                stem_results[stem_type] = stem_metadata
-                
-                # Load processed stem for summing
-                processed_audio, _ = sf.read(stem_out_path)
-                processed_stems[stem_type] = processed_audio
-                
-                print(f"  ✅ Processed {stem_type} stem")
+            advanced_variant = None
+            extreme_variant = None
+            depth_style = None
+            musical_style = None
+            hybrid_style = None
             
-            # Intelligent stem summing
+            if is_advanced and CONFIG.pipeline.use_advanced_stem_processing:
+                # Use advanced processing pipeline
+                from advanced_stem_processing import apply_advanced_processing, ADVANCED_VARIANTS
+                
+                advanced_name = combination_key.replace("advanced:", "")
+                # Find the matching variant
+                for av in ADVANCED_VARIANTS:
+                    if av.name == advanced_name:
+                        advanced_variant = av
+                        break
+                
+                if not advanced_variant:
+                    print(f"  ⚠️ Unknown advanced variant: {advanced_name}, using basic processing")
+                    is_advanced = False
+            
+            elif is_extreme and CONFIG.pipeline.use_extreme_stem_processing:
+                # Use extreme processing pipeline
+                from extreme_stem_processing import apply_extreme_processing, EXTREME_VARIANTS
+                
+                extreme_name = combination_key.replace("extreme:", "")
+                # Find the matching variant
+                for ev in EXTREME_VARIANTS:
+                    if ev.name == extreme_name:
+                        extreme_variant = ev
+                        break
+                
+                if not extreme_variant:
+                    print(f"  ⚠️ Unknown extreme variant: {extreme_name}, using basic processing")
+                    is_extreme = False
+                    
+            elif is_depth and CONFIG.pipeline.use_depth_processing:
+                # Use depth processing
+                depth_style = combination_key.replace("depth:", "")
+                valid_depth_styles = ["natural", "dramatic", "intimate", "stadium", "focused"]
+                
+                if depth_style not in valid_depth_styles:
+                    print(f"  ⚠️ Unknown depth style: {depth_style}, using natural")
+                    depth_style = "natural"
+                    
+            elif is_musical and CONFIG.pipeline.use_musical_depth_processing:
+                # Use musical depth processing
+                musical_style = combination_key.replace("musical:", "")
+                valid_musical_styles = ["balanced", "vocal_forward", "warm", "clear", "polished"]
+                
+                if musical_style not in valid_musical_styles:
+                    print(f"  ⚠️ Unknown musical style: {musical_style}, using balanced")
+                    musical_style = "balanced"
+                    
+            elif is_hybrid and CONFIG.pipeline.use_hybrid_processing:
+                # Use hybrid processing (advanced + depth)
+                hybrid_style = combination_key.replace("hybrid:", "")
+                valid_hybrid_styles = ["RadioReady_depth", "Aggressive_depth", "PunchyMix_depth"]
+                
+                if hybrid_style not in valid_hybrid_styles:
+                    print(f"  ⚠️ Unknown hybrid style: {hybrid_style}, using RadioReady_depth")
+                    hybrid_style = "RadioReady_depth"
+            
+            if is_advanced and CONFIG.pipeline.use_advanced_stem_processing and advanced_variant:
+                # Advanced processing path
+                print(f"  🎨 Using advanced processing: {advanced_variant.description}")
+                
+                # Load raw stems for advanced processing
+                raw_stems = {}
+                for stem_type, engine in self.stem_engines.items():
+                    # Get raw audio from engine
+                    raw_stems[stem_type] = engine.x
+                
+                # Apply advanced processing chain
+                processed_stems = apply_advanced_processing(
+                    raw_stems,
+                    list(self.stem_engines.values())[0].sr,  # Get sample rate
+                    advanced_variant
+                )
+                
+                # Save processed stems
+                stem_results = {}
+                for stem_type, processed_audio in processed_stems.items():
+                    stem_out_path = os.path.join(variant_dir, f"{stem_type}_processed.wav")
+                    sf.write(stem_out_path, processed_audio, 
+                           list(self.stem_engines.values())[0].sr, subtype=opts.bit_depth if opts else "PCM_24")
+                    stem_results[stem_type] = {"out_path": stem_out_path, "advanced": True}
+            
+            elif is_extreme and CONFIG.pipeline.use_extreme_stem_processing and extreme_variant:
+                # Extreme processing path
+                print(f"  🔮 Using EXTREME processing: {extreme_variant.description}")
+                print(f"      ⚠️ This may take significantly longer...")
+                
+                # Load raw stems for extreme processing
+                raw_stems = {}
+                for stem_type, engine in self.stem_engines.items():
+                    # Get raw audio from engine
+                    raw_stems[stem_type] = engine.x
+                
+                # Apply extreme processing chain
+                processed_stems = apply_extreme_processing(
+                    raw_stems,
+                    list(self.stem_engines.values())[0].sr,  # Get sample rate
+                    extreme_variant,
+                    bpm=CONFIG.pipeline.default_bpm
+                )
+                
+                # Save processed stems
+                stem_results = {}
+                for stem_type, processed_audio in processed_stems.items():
+                    stem_out_path = os.path.join(variant_dir, f"{stem_type}_processed.wav")
+                    sf.write(stem_out_path, processed_audio, 
+                           list(self.stem_engines.values())[0].sr, subtype=opts.bit_depth if opts else "PCM_24")
+                    stem_results[stem_type] = {"out_path": stem_out_path, "extreme": True}
+                    
+            elif is_depth and CONFIG.pipeline.use_depth_processing and depth_style:
+                # Depth processing path
+                print(f"  🏞️ Using depth processing: {depth_style} positioning")
+                
+                # Load raw stems for depth processing  
+                raw_stems = {}
+                for stem_type, engine in self.stem_engines.items():
+                    # Get raw audio from engine
+                    raw_stems[stem_type] = engine.x
+                
+                # Apply depth processing
+                from depth_processing import create_depth_variant
+                processed_stems = create_depth_variant(
+                    raw_stems,
+                    list(self.stem_engines.values())[0].sr,  # Get sample rate
+                    depth_style
+                )
+                
+                # Save processed stems
+                stem_results = {}
+                for stem_type, processed_audio in processed_stems.items():
+                    stem_out_path = os.path.join(variant_dir, f"{stem_type}_processed.wav")
+                    sf.write(stem_out_path, processed_audio, 
+                           list(self.stem_engines.values())[0].sr, subtype=opts.bit_depth if opts else "PCM_24")
+                    stem_results[stem_type] = {"out_path": stem_out_path, "depth": True}
+                    
+            elif is_musical and CONFIG.pipeline.use_musical_depth_processing and musical_style:
+                # Musical depth processing path
+                print(f"  🎵 Using musical depth processing: {musical_style} (subtle & professional)")
+                
+                # Load raw stems for musical depth processing
+                raw_stems = {}
+                for stem_type, engine in self.stem_engines.items():
+                    # Get raw audio from engine
+                    raw_stems[stem_type] = engine.x
+                
+                # Apply musical depth processing
+                from subtle_depth_processing import create_musical_depth
+                processed_stems = create_musical_depth(
+                    raw_stems,
+                    list(self.stem_engines.values())[0].sr,  # Get sample rate
+                    musical_style
+                )
+                
+                # Save processed stems
+                stem_results = {}
+                for stem_type, processed_audio in processed_stems.items():
+                    stem_out_path = os.path.join(variant_dir, f"{stem_type}_processed.wav")
+                    sf.write(stem_out_path, processed_audio, 
+                           list(self.stem_engines.values())[0].sr, subtype=opts.bit_depth if opts else "PCM_24")
+                    stem_results[stem_type] = {"out_path": stem_out_path, "musical": True}
+                    
+            elif is_hybrid and CONFIG.pipeline.use_hybrid_processing and hybrid_style:
+                # Hybrid processing path (advanced + depth)
+                print(f"  🔄 Using hybrid processing: {hybrid_style}")
+                
+                # Load raw stems for hybrid processing
+                raw_stems = {}
+                for stem_type, engine in self.stem_engines.items():
+                    # Get raw audio from engine
+                    raw_stems[stem_type] = engine.x
+                
+                # Apply hybrid processing
+                from hybrid_processing import create_hybrid_variant
+                processed_stems = create_hybrid_variant(
+                    raw_stems,
+                    list(self.stem_engines.values())[0].sr,  # Get sample rate
+                    hybrid_style
+                )
+                
+                # Save processed stems
+                stem_results = {}
+                for stem_type, processed_audio in processed_stems.items():
+                    stem_out_path = os.path.join(variant_dir, f"{stem_type}_processed.wav")
+                    sf.write(stem_out_path, processed_audio, 
+                           list(self.stem_engines.values())[0].sr, subtype=opts.bit_depth if opts else "PCM_24")
+                    stem_results[stem_type] = {"out_path": stem_out_path, "hybrid": True}
+                
+            else:
+                # Basic dial-based processing path
+                stem_results = {}
+                processed_stems = {}
+                
+                for stem_type, engine in self.stem_engines.items():
+                    # Get dial settings for this stem in this combination
+                    dial_state = get_stem_variant_for_combination(stem_type, combination_key)
+                    
+                    # Process the stem
+                    stem_out_path = os.path.join(variant_dir, f"{stem_type}_processed.wav")
+                    stem_metadata = engine.commit(stem_out_path, dial_state, opts)
+                    stem_results[stem_type] = stem_metadata
+                    
+                    # Load processed stem for summing
+                    processed_audio, _ = sf.read(stem_out_path)
+                    processed_stems[stem_type] = processed_audio
+                    
+                    print(f"  ✅ Processed {stem_type} stem")
+            
+            # Intelligent stem summing (works for both basic and advanced)
             final_mix = self._sum_stems_intelligently(processed_stems)
             
             # Save final mixed result
@@ -306,6 +509,7 @@ class StemRenderEngine:
     def _sum_stems_intelligently(self, processed_stems: Dict[str, np.ndarray]) -> np.ndarray:
         """
         Combine processed stems with intelligent gain staging and bus processing.
+        Now uses configurable stem gains from CONFIG for better balance control.
         
         Args:
             processed_stems: Dict of stem_type -> processed audio arrays
@@ -313,6 +517,8 @@ class StemRenderEngine:
         Returns:
             Final mixed stereo array
         """
+        from config import CONFIG
+        
         if not processed_stems:
             raise ValueError("No processed stems to sum")
         
@@ -324,20 +530,23 @@ class StemRenderEngine:
         
         # Calculate conservative gains based on number of active stems
         num_stems = len(processed_stems)
-        base_headroom = 0.7  # Start with 70% headroom
         
-        # Intelligent gain staging per stem type with headroom consideration
-        stem_gains = {
-            "drums": 0.7,    # Drums controlled to avoid overpowering
-            "bass": 0.6,     # Bass needs the most control for headroom
-            "vocals": 0.8,   # Vocals important but controlled
-            "music": 0.65    # Music/instruments as foundation
-        }
+        # Use configured stem gains (now user-adjustable!)
+        stem_gains = CONFIG.pipeline.get_stem_gains()  # This supports env vars too
         
-        # Apply additional scaling based on number of stems to prevent clipping
-        stem_scale_factor = base_headroom / num_stems
+        # Apply auto-gain compensation if enabled to prevent clipping
+        if CONFIG.pipeline.auto_gain_compensation:
+            # Smart scaling based on number of stems and their combined gain
+            total_gain = sum(stem_gains.get(stem_type, 0.7) for stem_type in processed_stems.keys())
+            if total_gain > 1.5:  # If combined gains might clip
+                stem_scale_factor = 1.5 / total_gain
+                print(f"    Auto-gain compensation: {20*np.log10(stem_scale_factor):.1f} dB")
+            else:
+                stem_scale_factor = 1.0
+        else:
+            stem_scale_factor = 1.0
         
-        # Sum stems with conservative gains
+        # Sum stems with intelligent gain handling (supports detailed stems)
         for stem_type, audio in processed_stems.items():
             # Pad if necessary
             if len(audio) < max_length:
@@ -352,17 +561,31 @@ class StemRenderEngine:
                 # Convert mono to stereo
                 audio = np.column_stack([audio, audio])
             
-            # Apply conservative stem-specific gain with scaling
-            base_gain = stem_gains.get(stem_type, 0.6)
+            # Get gain for this specific stem (detailed stems get their own gain, otherwise fallback to category)
+            if stem_type in stem_gains:
+                # Use specific gain if available (for detailed stems)
+                base_gain = stem_gains[stem_type]
+            else:
+                # Fallback to main category gain
+                stem_mapping = {
+                    'kick': 'drums', 'snare': 'drums', 'hats': 'drums',
+                    'backvocals': 'vocals', 'leadvocals': 'vocals',
+                    'guitar': 'music', 'keys': 'music', 'strings': 'music'
+                }
+                category = stem_mapping.get(stem_type, 'music')  # Default to music
+                base_gain = stem_gains.get(category, 0.7)  # Use category gain or default
+                print(f"      {stem_type} → {category} category gain")
+            
             final_gain = base_gain * stem_scale_factor
             final_mix += audio * final_gain
+            print(f"      {stem_type}: gain={base_gain:.2f} (scaled={final_gain:.2f})")
         
         # Measure peak after summing
         peak = np.max(np.abs(final_mix))
         print(f"    Peak after stem summing: {peak:.3f} ({20*np.log10(peak):.1f} dBFS)")
         
         # Apply makeup gain to bring level back up while staying safe
-        target_peak = 0.8  # Target -1.9 dBFS peak
+        target_peak = CONFIG.pipeline.stem_sum_target_peak  # Use configured target
         if peak > 0.001:  # Avoid division by zero
             makeup_gain = min(target_peak / peak, 1.5)  # Limit makeup gain
             final_mix *= makeup_gain

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Optional, Tuple, Dict, Any, List
 from config import CONFIG
 from audio_utils import (
-    sanitize_audio, db_to_linear, true_peak_db, normalize_true_peak,
+    sanitize_audio, db_to_linear, linear_to_db, true_peak_db, normalize_true_peak,
     validate_audio, to_mono
 )
 from data_handler import register_artifact
@@ -288,21 +288,21 @@ class LocalMasterProvider(MasteringProvider):
             
             # Apply "glue" compression via parallel limiting
             if style == "optimized_youtube":
-                # More aggressive limiting for YouTube optimization
-                limited = _lookahead_limiter(processed, sr, ceiling_dbfs=-1.5)  # More conservative ceiling
+                # More aggressive limiting for YouTube optimization but safer ceiling
+                limited = _lookahead_limiter(processed, sr, ceiling_dbfs=-2.2)  # Slightly more conservative
                 processed = (1.0 - glue_amount) * processed + glue_amount * limited
                 # Final peak control with safer true peak for YouTube's AAC codec
                 final_peak = true_peak_db(processed, sr)
-                if final_peak > -2.0:  # Only normalize if too hot
-                    processed = normalize_true_peak(processed, sr, target_dbtp=-2.0)
-                    print(f"    Applied final YouTube normalization to -2.0 dBTP")
+                if final_peak > -2.5:  # More conservative threshold
+                    processed = normalize_true_peak(processed, sr, target_dbtp=-2.5)
+                    print(f"    Applied final YouTube normalization to -2.5 dBTP")
             else:
-                limited = _lookahead_limiter(processed, sr, ceiling_dbfs=-2.0)  # More conservative ceiling
+                limited = _lookahead_limiter(processed, sr, ceiling_dbfs=-2.5)  # More conservative ceiling
                 processed = (1.0 - glue_amount) * processed + glue_amount * limited
-                # Final peak control - only if needed
+                # Final peak control - more conservative threshold
                 final_peak = true_peak_db(processed, sr)
                 target_peak = CONFIG.audio.render_peak_target_dbfs
-                if final_peak > target_peak + 0.5:  # Only normalize if significantly over target
+                if final_peak > target_peak + 0.2:  # More sensitive threshold (was 0.5)
                     processed = normalize_true_peak(processed, sr, target_dbtp=target_peak)
                     print(f"    Applied final normalization to {target_peak:.1f} dBTP")
                 else:
@@ -639,12 +639,12 @@ class MasteringOrchestrator:
             # Apply gain
             level_matched = (audio * db_to_linear(gain_db)).astype(np.float32)
             
-            # Check for clipping and apply soft limiting if needed
+            # Check for clipping and apply proper limiting if needed
             peak = np.max(np.abs(level_matched))
-            if peak > 0.99:
-                # Apply soft limiting to prevent clipping
-                level_matched = np.clip(level_matched, -0.99, 0.99)
-                print(f"      Applied soft limiting to prevent clipping")
+            if peak > 0.95:  # More conservative threshold
+                # Apply proper limiting instead of hard clipping
+                level_matched = _lookahead_limiter(level_matched, sr, ceiling_dbfs=-0.5)
+                print(f"      Applied limiting to prevent clipping (peak was {linear_to_db(peak):.1f} dBFS)")
             
             print(f"      {result.style} -14 LUFS: {current_lufs:.1f} → {target_lufs:.1f} LUFS (gain: {gain_db:+.1f} dB)")
             
@@ -687,12 +687,12 @@ class MasteringOrchestrator:
             # Apply gain
             level_matched = (audio * db_to_linear(gain_db)).astype(np.float32)
             
-            # Check for clipping and apply soft limiting if needed
+            # Check for clipping and apply proper limiting if needed
             peak = np.max(np.abs(level_matched))
-            if peak > 0.99:
-                # Apply soft limiting to prevent clipping
-                level_matched = np.clip(level_matched, -0.99, 0.99)
-                print(f"      Applied soft limiting to prevent clipping")
+            if peak > 0.95:  # More conservative threshold
+                # Apply proper limiting instead of hard clipping
+                level_matched = _lookahead_limiter(level_matched, sr, ceiling_dbfs=-0.5)
+                print(f"      Applied limiting to prevent clipping (peak was {linear_to_db(peak):.1f} dBFS)")
             
             print(f"      {result.style} -14 LUFS: {current_lufs:.1f} → {target_lufs:.1f} LUFS (gain: {gain_db:+.1f} dB)")
             

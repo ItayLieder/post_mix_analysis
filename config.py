@@ -22,8 +22,8 @@ class AudioConfig:
     # Peak/loudness targets
     prep_hpf_hz: float = 20.0
     prep_peak_target_dbfs: float = -6.0
-    render_peak_target_dbfs: float = -1.0
-    true_peak_ceiling_db: float = -1.0
+    render_peak_target_dbfs: float = -1.2
+    true_peak_ceiling_db: float = -1.2
     
     # Analysis settings
     lufs_bs1770_offset: float = -0.691
@@ -220,12 +220,124 @@ class PipelineConfig:
     
     # Stem combination variants to generate
     stem_combinations: list = field(default_factory=lambda: [
+        # Original basic combinations
         ("Stem_PunchyMix", "punchy"),
         ("Stem_WideAndOpen", "wide"), 
         ("Stem_TightAndControlled", "tight"),
         ("Stem_Aggressive", "aggressive"),
-        ("Stem_Balanced", "natural")
+        ("Stem_Balanced", "natural"),
+        
+        # Advanced combinations (comment out to disable)
+        ("Stem_RadioReady", "advanced:RadioReady"),
+        ("Stem_LiveBand", "advanced:LiveBand"),
+        ("Stem_EDM_Club", "advanced:EDM_Club"),
+        ("Stem_Intimate", "advanced:Intimate_Acoustic"),
+        ("Stem_Experimental", "advanced:Experimental"),
+        ("Stem_VintageSoul", "advanced:Vintage_Soul"),
+        ("Stem_ModernPop", "advanced:Modern_Pop"),
+        ("Stem_HeavyRock", "advanced:Heavy_Rock"),
+        
+        # EXTREME combinations (push the boundaries!)
+        ("Stem_3D_Immersive", "extreme:3D_Immersive"),
+        ("Stem_Cinematic_AI", "extreme:Cinematic_AI"),
+        ("Stem_Binaural_Psycho", "extreme:Binaural_Psycho"),
+        ("Stem_VR_Experience", "extreme:VR_Experience"),
+        ("Stem_Quantum_Club", "extreme:Quantum_Club"),
+        ("Stem_Neural_Trance", "extreme:Neural_Trance"),
+        ("Stem_Breakbeat_Morph", "extreme:Breakbeat_Morph"),
+        ("Stem_Subliminal", "extreme:Subliminal_Adaptive"),
+        
+        # DEPTH combinations (fix flat-sounding mixes!)
+        ("Stem_Depth_Natural", "depth:natural"),
+        ("Stem_Depth_Dramatic", "depth:dramatic"),
+        ("Stem_Depth_Intimate", "depth:intimate"),
+        ("Stem_Depth_Stadium", "depth:stadium"),
+        ("Stem_Depth_VocalFocus", "depth:focused"),
+        
+        # MUSICAL DEPTH combinations (subtle, professional depth!)
+        ("Stem_Musical_Balanced", "musical:balanced"),
+        ("Stem_Musical_VocalForward", "musical:vocal_forward"),
+        ("Stem_Musical_Warm", "musical:warm"),
+        ("Stem_Musical_Clear", "musical:clear"),
+        ("Stem_Musical_Polished", "musical:polished"),
+        
+        # HYBRID combinations (advanced processing + subtle depth!)
+        ("Stem_RadioReady_Depth", "hybrid:RadioReady_depth"),
+        ("Stem_Aggressive_Depth", "hybrid:Aggressive_depth"),
+        ("Stem_PunchyMix_Depth", "hybrid:PunchyMix_depth"),
     ])
+    
+    # Enable/disable advanced stem processing
+    use_advanced_stem_processing: bool = True
+    
+    # Enable/disable extreme stem processing (VERY CPU intensive!)
+    use_extreme_stem_processing: bool = True
+    
+    # Enable/disable depth processing
+    use_depth_processing: bool = True
+    
+    # Enable/disable musical depth processing
+    use_musical_depth_processing: bool = True
+    
+    # Enable/disable hybrid processing (advanced + depth)
+    use_hybrid_processing: bool = True
+    
+    # BPM for tempo-synced effects
+    default_bpm: float = 120.0
+    
+    # Stem balancing configuration - USER ADJUSTABLE
+    # These gains are applied before summing stems together
+    # Default values provide better balance with music not too weak
+    stem_gains: dict = field(default_factory=lambda: {
+        # Main stem categories
+        "drums": 0.75,    # Slightly reduced from 0.7 to make room
+        "bass": 0.65,     # Kept controlled for headroom
+        "vocals": 0.85,   # Vocals forward but not overpowering
+        "music": 0.80,    # INCREASED from 0.65 - music now properly audible
+        
+        # Detailed stems (if not specified, falls back to main category gain)
+        "kick": 0.80,         # Kick drum - slightly louder than general drums
+        "snare": 0.75,        # Snare drum
+        "hats": 0.65,         # Hi-hats - often need taming
+        "backvocals": 0.70,   # Backing vocals - lower than lead
+        "leadvocals": 0.90,   # Lead vocals - prominent
+        "guitar": 0.75,       # Guitar
+        "keys": 0.80,         # Keys/synths
+        "strings": 0.85,      # Strings - often need presence
+    })
+    
+    # Style-specific stem balance adjustments (optional)
+    # These multiply the base stem_gains for each combination style
+    stem_balance_styles: dict = field(default_factory=lambda: {
+        "punchy": {"drums": 1.1, "bass": 1.0, "vocals": 0.95, "music": 0.9},
+        "wide": {"drums": 0.9, "bass": 0.95, "vocals": 1.0, "music": 1.1},
+        "tight": {"drums": 1.0, "bass": 1.05, "vocals": 1.0, "music": 0.95},
+        "aggressive": {"drums": 1.15, "bass": 1.1, "vocals": 1.05, "music": 0.85},
+        "natural": {"drums": 1.0, "bass": 1.0, "vocals": 1.0, "music": 1.0}
+    })
+    
+    # Auto-gain compensation based on number of stems
+    # If True, applies additional scaling to prevent clipping with multiple stems
+    auto_gain_compensation: bool = True
+    
+    # Target peak after stem summing (before mastering)
+    stem_sum_target_peak: float = 0.8  # -1.9 dBFS
+    
+    def get_stem_gains(self) -> dict:
+        """Get stem gains with environment variable override support."""
+        gains = self.stem_gains.copy()
+        
+        # Allow environment variable overrides
+        if os.getenv('STEM_GAIN_DRUMS'):
+            gains['drums'] = float(os.getenv('STEM_GAIN_DRUMS'))
+        if os.getenv('STEM_GAIN_BASS'):
+            gains['bass'] = float(os.getenv('STEM_GAIN_BASS'))
+        if os.getenv('STEM_GAIN_VOCALS'):
+            gains['vocals'] = float(os.getenv('STEM_GAIN_VOCALS'))
+        if os.getenv('STEM_GAIN_MUSIC'):
+            gains['music'] = float(os.getenv('STEM_GAIN_MUSIC'))
+            
+        return gains
     
     def get_processing_mode(self) -> str:
         """Get processing mode with environment variable override."""
