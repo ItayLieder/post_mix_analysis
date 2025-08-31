@@ -19,8 +19,8 @@ class AudioConfig:
     max_clip_range: float = 4.0
     safe_clip_range: float = 1.0
     
-    # Peak/loudness targets
-    prep_hpf_hz: float = 20.0
+    # Peak/loudness targets  
+    prep_hpf_hz: float = 5.0  # Very low to preserve bass content
     prep_peak_target_dbfs: float = -6.0
     render_peak_target_dbfs: float = -1.2
     true_peak_ceiling_db: float = -1.2
@@ -218,92 +218,70 @@ class PipelineConfig:
     stem_required_categories: list = field(default_factory=lambda: ["music"])  # At least music stem required
     stem_optional_categories: list = field(default_factory=lambda: ["drums", "bass", "vocals"])
     
-    # Stem combination variants to generate
+    # Stem combination variants to generate - BIG VARIANTS SYSTEM!
     stem_combinations: list = field(default_factory=lambda: [
-        # Original basic combinations
+        # BIG VARIANTS - The amazing processing that sounds INCREDIBLE!
+        ("BIG_Exact_Match", "big:BIG_Exact_Match"),  # EXACT replica of the amazing BIG_POWERFUL_STEM_MIX.wav - FIRST!
+        ("BIG_Amazing", "big:BIG_Amazing"),
+        ("BIG_Massive_Drums", "big:BIG_Massive_Drums"), 
+        ("BIG_Foundation_Bass", "big:BIG_Foundation_Bass"),
+        ("BIG_Vocal_Domination", "big:BIG_Vocal_Domination"),
+        ("BIG_Cinematic_Wide", "big:BIG_Cinematic_Wide"),
+        ("BIG_Radio_Power", "big:BIG_Radio_Power"),
+        ("BIG_Club_Energy", "big:BIG_Club_Energy"),
+        ("BIG_Modern_Pop", "big:BIG_Modern_Pop"),
+        ("BIG_Rock_Power", "big:BIG_Rock_Power"),
+        ("BIG_Intimate_Powerful", "big:BIG_Intimate_Powerful"),
+        ("BIG_Maximum_Impact", "big:BIG_Maximum_Impact"),
+        
+        # Original basic combinations (kept for compatibility)
         ("Stem_PunchyMix", "punchy"),
         ("Stem_WideAndOpen", "wide"), 
         ("Stem_TightAndControlled", "tight"),
         ("Stem_Aggressive", "aggressive"),
         ("Stem_Balanced", "natural"),
-        
-        # Advanced combinations (comment out to disable)
-        ("Stem_RadioReady", "advanced:RadioReady"),
-        ("Stem_LiveBand", "advanced:LiveBand"),
-        ("Stem_EDM_Club", "advanced:EDM_Club"),
-        ("Stem_Intimate", "advanced:Intimate_Acoustic"),
-        ("Stem_Experimental", "advanced:Experimental"),
-        ("Stem_VintageSoul", "advanced:Vintage_Soul"),
-        ("Stem_ModernPop", "advanced:Modern_Pop"),
-        ("Stem_HeavyRock", "advanced:Heavy_Rock"),
-        
-        # EXTREME combinations (push the boundaries!)
-        ("Stem_3D_Immersive", "extreme:3D_Immersive"),
-        ("Stem_Cinematic_AI", "extreme:Cinematic_AI"),
-        ("Stem_Binaural_Psycho", "extreme:Binaural_Psycho"),
-        ("Stem_VR_Experience", "extreme:VR_Experience"),
-        ("Stem_Quantum_Club", "extreme:Quantum_Club"),
-        ("Stem_Neural_Trance", "extreme:Neural_Trance"),
-        ("Stem_Breakbeat_Morph", "extreme:Breakbeat_Morph"),
-        ("Stem_Subliminal", "extreme:Subliminal_Adaptive"),
-        
-        # DEPTH combinations (fix flat-sounding mixes!)
-        ("Stem_Depth_Natural", "depth:natural"),
-        ("Stem_Depth_Dramatic", "depth:dramatic"),
-        ("Stem_Depth_Intimate", "depth:intimate"),
-        ("Stem_Depth_Stadium", "depth:stadium"),
-        ("Stem_Depth_VocalFocus", "depth:focused"),
-        
-        # MUSICAL DEPTH combinations (subtle, professional depth!)
-        ("Stem_Musical_Balanced", "musical:balanced"),
-        ("Stem_Musical_VocalForward", "musical:vocal_forward"),
-        ("Stem_Musical_Warm", "musical:warm"),
-        ("Stem_Musical_Clear", "musical:clear"),
-        ("Stem_Musical_Polished", "musical:polished"),
-        
-        # HYBRID combinations (advanced processing + subtle depth!)
-        ("Stem_RadioReady_Depth", "hybrid:RadioReady_depth"),
-        ("Stem_Aggressive_Depth", "hybrid:Aggressive_depth"),
-        ("Stem_PunchyMix_Depth", "hybrid:PunchyMix_depth"),
     ])
     
-    # Enable/disable advanced stem processing
-    use_advanced_stem_processing: bool = True
+    # Enable/disable advanced stem processing (DISABLED - causes quality issues)
+    use_advanced_stem_processing: bool = False
     
-    # Enable/disable extreme stem processing (VERY CPU intensive!)
-    use_extreme_stem_processing: bool = True
+    # Enable/disable extreme stem processing (DISABLED - causes quality issues)
+    use_extreme_stem_processing: bool = False
     
-    # Enable/disable depth processing
-    use_depth_processing: bool = True
+    # Enable/disable depth processing (DISABLED - causes quality issues)
+    use_depth_processing: bool = False
     
-    # Enable/disable musical depth processing
-    use_musical_depth_processing: bool = True
+    # Enable/disable musical depth processing (DISABLED - causes quality issues)
+    use_musical_depth_processing: bool = False
     
-    # Enable/disable hybrid processing (advanced + depth)
-    use_hybrid_processing: bool = True
+    # Enable/disable hybrid processing (DISABLED - causes quality issues)
+    use_hybrid_processing: bool = False
+    
+    # Use BIG impressive processing (DEFAULT - sounds AMAZING and MUCH BIGGER!)
+    use_big_impressive_processing: bool = True
     
     # BPM for tempo-synced effects
     default_bpm: float = 120.0
     
-    # Stem balancing configuration - USER ADJUSTABLE
-    # These gains are applied before summing stems together
-    # Default values provide better balance with music not too weak
+    # Stem balancing configuration - EXACT MATCH TO BIG_POWERFUL_STEM_MIX.wav!
+    # These gains EXACTLY match what created the amazing BIG_POWERFUL_STEM_MIX.wav file
+    # DO NOT CHANGE - these are the exact values that sound amazing
     stem_gains: dict = field(default_factory=lambda: {
-        # Main stem categories
-        "drums": 0.75,    # Slightly reduced from 0.7 to make room
-        "bass": 0.65,     # Kept controlled for headroom
-        "vocals": 0.85,   # Vocals forward but not overpowering
-        "music": 0.80,    # INCREASED from 0.65 - music now properly audible
+        # Main stem categories - EXACT VALUES FROM AMAZING FILE
+        "drums": 3.0,     # HUGE drums (exact match to amazing file)
+        "bass": 2.8,      # MASSIVE bass (exact match to amazing file)
+        "vocals": 4.0,    # COMMANDING vocals (exact match to amazing file) 
+        "music": 2.0,     # BIG musical content (exact match to amazing file)
         
-        # Detailed stems (if not specified, falls back to main category gain)
-        "kick": 0.80,         # Kick drum - slightly louder than general drums
-        "snare": 0.75,        # Snare drum
-        "hats": 0.65,         # Hi-hats - often need taming
-        "backvocals": 0.70,   # Backing vocals - lower than lead
-        "leadvocals": 0.90,   # Lead vocals - prominent
-        "guitar": 0.75,       # Guitar
-        "keys": 0.80,         # Keys/synths
-        "strings": 0.85,      # Strings - often need presence
+        # Detailed stems (exact match to amazing file proportions)
+        "kick": 3.0,         # KICK EXTREMELY LOUD - exact match
+        "snare": 2.5,        # SNARE VERY LOUD - exact match  
+        "hats": 1.8,         # Hi-hats - exact match
+        "backvocals": 2.5,   # Backing vocals - exact match
+        "leadvocals": 4.0,   # Lead vocals - exact match
+        "guitar": 2.0,       # Guitar - proportional to music
+        "keys": 2.0,         # Keys/synths - proportional to music
+        "strings": 2.0,      # Strings - proportional to music
     })
     
     # Style-specific stem balance adjustments (optional)
@@ -317,11 +295,16 @@ class PipelineConfig:
     })
     
     # Auto-gain compensation based on number of stems
-    # If True, applies additional scaling to prevent clipping with multiple stems
-    auto_gain_compensation: bool = True
+    # DISABLED - was causing weak mixes by reducing levels too aggressively
+    auto_gain_compensation: bool = False
     
-    # Target peak after stem summing (before mastering)
-    stem_sum_target_peak: float = 0.8  # -1.9 dBFS
+    # Target peak after stem summing (before mastering) - BOOSTED FOR POWER
+    stem_sum_target_peak: float = 0.98  # -0.17 dBFS (EXTREMELY LOUD!)
+    
+    # Output control - whether to create individual processed stem files
+    # If False, only creates the main mix file (e.g., "BIG_Amazing.wav")
+    # If True, also creates individual stem files (e.g., "bass_processed.wav", "drums_processed.wav")
+    create_individual_stem_files: bool = True
     
     def get_stem_gains(self) -> dict:
         """Get stem gains with environment variable override support."""
