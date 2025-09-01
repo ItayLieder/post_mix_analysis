@@ -6,7 +6,7 @@ from dsp_premitives import (
     shelf_filter, peaking_eq, highpass_filter, 
     compressor, transient_shaper
 )
-from audio_utils import db_to_linear, ensure_stereo
+from utils import db_to_linear, ensure_stereo
 
 def enhance_mix_settings(session):
     """Apply WORKING enhancements to the mix session"""

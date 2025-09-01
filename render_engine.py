@@ -9,7 +9,7 @@ from typing import Optional, Dict, Any, List, Tuple
 import os
 import numpy as np
 import soundfile as sf
-from processors import *
+from processors import build_preview_cache  # Import the missing function
 from dsp_premitives import *
 # ---- Dial state (what the user controls) ----
 
@@ -146,7 +146,7 @@ class RenderEngine:
             y = highpass_filter(y, self.sr, cutoff_hz=opts.hpf_hz, order=2)
 
         # Validate and sanitize audio before writing
-        from audio_utils import sanitize_audio
+        from utils import sanitize_audio
         try:
             y = sanitize_audio(y, clip_range=2.0)  # Allow some headroom
         except Exception as e:

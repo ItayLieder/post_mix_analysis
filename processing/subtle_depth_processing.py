@@ -7,7 +7,7 @@ This creates depth without going overboard - think "RadioReady with dimension"
 
 import numpy as np
 from typing import Dict, Tuple, Optional
-from audio_utils import ensure_stereo, to_mono, db_to_linear, linear_to_db
+from utils import ensure_stereo, to_mono, db_to_linear, linear_to_db
 from scipy import signal
 
 

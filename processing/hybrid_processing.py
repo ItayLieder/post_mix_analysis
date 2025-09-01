@@ -8,7 +8,7 @@ Perfect for getting the best of both worlds: advanced sonic shaping + dimensiona
 
 import numpy as np
 from typing import Dict, Tuple, Optional
-from audio_utils import ensure_stereo, to_mono, db_to_linear, linear_to_db
+from utils import ensure_stereo, to_mono, db_to_linear, linear_to_db
 
 
 def create_hybrid_variant(stems: Dict[str, np.ndarray], sr: int, hybrid_style: str) -> Dict[str, np.ndarray]:

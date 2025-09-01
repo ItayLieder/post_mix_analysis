@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import json
 
 from dsp_premitives import measure_peak, measure_rms, lufs_integrated_approx
-from advanced_dsp import frequency_slot_eq
+# from advanced_dsp import frequency_slot_eq
 
 
 @dataclass

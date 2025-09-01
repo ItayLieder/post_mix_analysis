@@ -14,8 +14,36 @@ from datetime import datetime
 import time
 
 # Import DSP functions
-from advanced_dsp import *
-from dsp_premitives import _db_to_lin, _lin_to_db
+from dsp_premitives import (
+    peaking_eq, shelf_filter, highpass_filter, lowpass_filter,
+    compressor, transient_shaper, stereo_widener, 
+    _db_to_lin, _lin_to_db, measure_peak, measure_rms
+)
+
+# Simple stubs for missing advanced DSP functions
+def analog_console_saturation(audio, sample_rate_or_drive=44100, drive=0.3, character='warm', **kwargs):
+    """Simple console saturation stub - gentle harmonic enhancement"""
+    # Handle both old and new calling conventions
+    if isinstance(sample_rate_or_drive, (int, float)) and sample_rate_or_drive > 100:
+        # Called with (audio, sample_rate, drive, character)
+        actual_drive = drive if isinstance(drive, (int, float)) else 0.3
+    else:
+        # Called with (audio, drive, ...)
+        actual_drive = sample_rate_or_drive if isinstance(sample_rate_or_drive, (int, float)) else 0.3
+    
+    return audio + np.tanh(audio * actual_drive * 0.5) * 0.1
+
+def tape_saturation(audio, drive=0.3, warmth=0.5, **kwargs):
+    """Simple tape saturation stub - warm harmonic distortion"""
+    return audio + np.tanh(audio * drive) * 0.08
+
+def tube_saturation(audio, drive=0.3, warmth=0.5, **kwargs):
+    """Simple tube saturation stub - smooth harmonic enhancement"""
+    return audio + np.tanh(audio * drive * 0.8) * 0.12
+
+def multiband_compressor(audio, sample_rate, **kwargs):
+    """Simple multiband compressor stub - uses single band compressor"""
+    return compressor(audio, sample_rate, threshold_db=-12, ratio=3.0, attack_ms=10, release_ms=100)
 
 
 @dataclass

@@ -12,7 +12,7 @@ import os
 from dataclasses import dataclass
 from scipy import signal
 
-from audio_utils import ensure_stereo, to_mono, db_to_linear, linear_to_db
+from utils import ensure_stereo, to_mono, db_to_linear, linear_to_db
 from dsp_premitives import (
     peaking_eq as parametric_eq, shelf_filter, highpass_filter, lowpass_filter,
     compressor

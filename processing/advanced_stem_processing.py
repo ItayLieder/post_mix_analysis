@@ -8,7 +8,7 @@ import numpy as np
 from typing import Dict, Tuple, Optional, List
 from dataclasses import dataclass
 from scipy import signal
-from audio_utils import ensure_stereo, to_mono, db_to_linear, linear_to_db
+from utils import ensure_stereo, to_mono, db_to_linear, linear_to_db
 
 
 # ============================================
@@ -374,7 +374,7 @@ def apply_ducking(target: np.ndarray, trigger: np.ndarray, sr: int,
                   amount: float = 0.3, attack_ms: float = 5, release_ms: float = 50) -> np.ndarray:
     """Apply sidechain compression (ducking) to target based on trigger envelope"""
     from processors import _envelope_detector
-    from audio_utils import to_mono
+    from utils import to_mono
     
     # Get trigger envelope
     trigger_mono = to_mono(trigger)

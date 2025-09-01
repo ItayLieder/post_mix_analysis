@@ -6,7 +6,26 @@ Takes reference analysis and adjusts our professional mixing to match the charac
 
 import numpy as np
 from typing import Dict, List, Optional
-from reference_analyzer import ReferenceAnalysis, ReferenceMixAnalyzer
+# from reference_analyzer import ReferenceAnalysis, ReferenceMixAnalyzer
+from dataclasses import dataclass
+from typing import Dict, Any
+
+@dataclass
+class ReferenceAnalysis:
+    """Temporary stub for missing ReferenceAnalysis"""
+    loudness_lufs: float = 0.0
+    dynamic_range: float = 0.0
+    stereo_width: float = 0.0
+    punch_factor: float = 0.0
+
+class ReferenceMixAnalyzer:
+    """Temporary stub for missing ReferenceMixAnalyzer"""
+    def __init__(self):
+        pass
+    
+    def analyze(self, audio_path: str) -> ReferenceAnalysis:
+        """Stub analysis - returns default values"""
+        return ReferenceAnalysis()
 from pro_mixing_engine import ProMixingSession
 
 
@@ -26,7 +45,7 @@ class ReferenceMatcher:
         reference_analysis = self.analyzer.analyze_reference(reference_path)
         
         # Print reference analysis
-        from reference_analyzer import print_reference_analysis
+        # from reference_analyzer import print_reference_analysis
         print_reference_analysis(reference_analysis)
         
         # Analyze stems if provided

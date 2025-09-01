@@ -13,17 +13,59 @@ from dataclasses import dataclass, field
 import json
 import time
 
-from audio_utils import ensure_stereo, to_mono, db_to_linear, linear_to_db
+from utils import ensure_stereo, to_mono, db_to_linear, linear_to_db
 from dsp_premitives import (
     peaking_eq, shelf_filter, highpass_filter, lowpass_filter,
     compressor, transient_shaper, stereo_widener
 )
-from advanced_dsp import (
-    sidechain_compressor, parallel_compression, multiband_compressor,
-    tape_saturation, tube_saturation, analog_console_saturation,
-    advanced_transient_shaper, haas_effect, stereo_spreader,
-    auto_gain_staging, frequency_slot_eq
-)
+# from advanced_dsp import (
+#     sidechain_compressor, parallel_compression, multiband_compressor,
+#     tape_saturation, tube_saturation, analog_console_saturation,
+#     advanced_transient_shaper, haas_effect, stereo_spreader,
+#     auto_gain_staging, frequency_slot_eq
+# )
+
+# Simple stubs for missing advanced DSP functions
+def sidechain_compressor(audio, sidechain, sample_rate, **kwargs):
+    """Simple sidechain compressor stub - basic ducking effect"""
+    # Simple envelope-based ducking
+    envelope = np.abs(sidechain)
+    reduction = np.where(envelope > 0.1, 0.7, 1.0)
+    return audio * reduction
+
+def parallel_compression(audio, sample_rate, **kwargs):
+    """Simple parallel compression stub"""
+    compressed = compressor(audio, sample_rate, threshold_db=-15, ratio=4.0, attack_ms=5, release_ms=50)
+    return audio * 0.7 + compressed * 0.3
+
+def advanced_transient_shaper(audio, attack=0.0, sustain=0.0, **kwargs):
+    """Simple transient shaper stub"""
+    return transient_shaper(audio, attack_gain_db=attack*6, sustain_gain_db=sustain*3)
+
+def stereo_spreader(audio, sample_rate, width=1.0, **kwargs):
+    """Simple stereo spreader stub"""
+    return stereo_widener(audio, width=width) if audio.ndim == 2 else audio
+
+def auto_gain_staging(audio, **kwargs):
+    """Simple auto gain staging stub"""
+    return audio
+
+# Copy stubs from pro_mixing_engine_fixed
+def analog_console_saturation(audio, drive=0.3, **kwargs):
+    """Simple console saturation stub"""
+    return audio + np.tanh(audio * drive * 0.5) * 0.1
+
+def tape_saturation(audio, drive=0.3, **kwargs):
+    """Simple tape saturation stub"""
+    return audio + np.tanh(audio * drive) * 0.08
+
+def tube_saturation(audio, drive=0.3, **kwargs):
+    """Simple tube saturation stub"""
+    return audio + np.tanh(audio * drive * 0.8) * 0.12
+
+def multiband_compressor(audio, sample_rate, **kwargs):
+    """Simple multiband compressor stub"""
+    return compressor(audio, sample_rate, threshold_db=-12, ratio=3.0, attack_ms=10, release_ms=100)
 
 
 @dataclass

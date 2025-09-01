@@ -13,7 +13,7 @@ def test_audio_utils():
     print("Testing audio_utils...")
     
     try:
-        from audio_utils import (
+        from utils import (
             to_float32, sanitize_audio, ensure_stereo, to_mono,
             db_to_linear, linear_to_db, true_peak_db, normalize_peak,
             validate_audio, rms_db, crest_factor_db
@@ -113,7 +113,7 @@ def test_analysis_module():
     
     try:
         from analysis import analyze_audio_array, health_metrics, stereo_metrics
-        from audio_utils import sanitize_audio
+        from utils import sanitize_audio
         
         # Create test audio
         duration = 1.0  # 1 second
