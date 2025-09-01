@@ -724,23 +724,138 @@ class FixedProMixingSession:
         stem_paths = {}
         
         if drum_mix is not None:
-            path = os.path.join(output_dir, 'drums_stem.wav')
+            path = os.path.join(output_dir, 'drums.wav')
             sf.write(path, drum_mix, self.sample_rate, subtype='FLOAT')
             stem_paths['drums'] = path
             
         if bass_mix is not None:
-            path = os.path.join(output_dir, 'bass_stem.wav')
+            path = os.path.join(output_dir, 'bass.wav')
             sf.write(path, bass_mix, self.sample_rate, subtype='FLOAT')
             stem_paths['bass'] = path
             
         if vocal_mix is not None:
-            path = os.path.join(output_dir, 'vocals_stem.wav')
+            path = os.path.join(output_dir, 'vocals.wav')
             sf.write(path, vocal_mix, self.sample_rate, subtype='FLOAT')
             stem_paths['vocals'] = path
             
         if music_mix is not None:
-            path = os.path.join(output_dir, 'music_stem.wav')
+            path = os.path.join(output_dir, 'music.wav')
             sf.write(path, music_mix, self.sample_rate, subtype='FLOAT')
             stem_paths['music'] = path
             
         return stem_paths
+
+    def _get_mix_configurations(self) -> Dict[str, Dict]:
+        """Get meaningful mix configuration variants"""
+        return {
+            "Standard_Mix": {
+                "description": "Balanced mix with moderate processing",
+                "saturation_mult": 1.0,
+                "compression_mult": 1.0,
+                "eq_mult": 1.0,
+                "stereo_mult": 1.0
+            },
+            "Vocal_Forward": {
+                "description": "Vocals pushed forward, instruments pulled back",
+                "vocal_boost": 1.3,
+                "instrument_reduction": 0.8,
+                "vocal_compression": 0.8
+            },
+            "Drum_Heavy": {
+                "description": "Powerful drums with enhanced low end",
+                "drum_boost": 1.4,
+                "bass_boost": 1.2,
+                "compression_mult": 1.3
+            },
+            "Intimate_Mix": {
+                "description": "Close, warm sound with reduced dynamics",
+                "saturation_mult": 1.5,
+                "compression_mult": 1.4,
+                "stereo_mult": 0.7
+            },
+            "Wide_Stereo": {
+                "description": "Maximum stereo width and space",
+                "stereo_mult": 1.6,
+                "reverb_mult": 1.3,
+                "compression_mult": 0.8
+            },
+            "Punchy_Rock": {
+                "description": "Aggressive, powerful rock sound",
+                "compression_mult": 1.5,
+                "saturation_mult": 1.3,
+                "drum_boost": 1.3
+            },
+            "Clean_Pop": {
+                "description": "Clean, polished modern pop sound",
+                "compression_mult": 0.7,
+                "saturation_mult": 0.5,
+                "eq_mult": 1.2
+            },
+            "Warm_Vintage": {
+                "description": "Warm, analog-inspired vintage sound",
+                "saturation_mult": 1.8,
+                "compression_mult": 1.2,
+                "eq_mult": 0.8
+            },
+            "Radio_Ready": {
+                "description": "Loud, compressed for radio play",
+                "compression_mult": 2.0,
+                "loudness_mult": 1.5,
+                "eq_mult": 1.1
+            },
+            "Dynamic_Master": {
+                "description": "Preserve dynamics, minimal processing",
+                "compression_mult": 0.5,
+                "saturation_mult": 0.3,
+                "loudness_mult": 0.8
+            }
+        }
+
+    def apply_mix_configuration(self, config_name: str):
+        """Apply a specific mix configuration"""
+        configs = self._get_mix_configurations()
+        
+        if config_name not in configs:
+            print(f"⚠️ Configuration '{config_name}' not found, using defaults")
+            return
+        
+        config = configs[config_name]
+        print(f"🎛️ Applying configuration: {config_name}")
+        print(f"   {config['description']}")
+        
+        # Apply configuration parameters to all channel strips
+        for ch_id, strip in self.channel_strips.items():
+            # Apply saturation multipliers
+            if 'saturation_mult' in config:
+                strip.saturation_amount *= config['saturation_mult']
+            
+            # Apply compression multipliers  
+            if 'compression_mult' in config:
+                if strip.comp_enabled:
+                    strip.comp_ratio = min(strip.comp_ratio * config['compression_mult'], 10.0)
+            
+            # Apply vocal-specific adjustments
+            if 'vocal' in ch_id.lower():
+                if 'vocal_boost' in config:
+                    strip.gain *= config['vocal_boost']
+                if 'vocal_compression' in config:
+                    strip.comp_ratio *= config['vocal_compression']
+            
+            # Apply drum-specific adjustments
+            if 'drums' in ch_id.lower():
+                if 'drum_boost' in config:
+                    strip.gain *= config['drum_boost']
+            
+            # Apply bass-specific adjustments  
+            if 'bass' in ch_id.lower():
+                if 'bass_boost' in config:
+                    strip.gain *= config['bass_boost']
+            
+            # Apply instrument reduction
+            if 'instrument_reduction' in config and 'vocal' not in ch_id.lower():
+                strip.gain *= config['instrument_reduction']
+            
+            # Apply EQ multipliers
+            if 'eq_mult' in config:
+                for eq_band in strip.eq_bands:
+                    eq_band['gain'] *= config['eq_mult']

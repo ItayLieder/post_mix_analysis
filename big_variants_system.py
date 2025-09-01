@@ -39,22 +39,21 @@ class BigVariantProfile:
 BIG_VARIANTS = [
     # CORE BIG VARIANT - The original amazing sound
     BigVariantProfile(
-        name="BIG_Amazing",
-        description="The original BIG processing that sounds amazing - maximum impact and presence",
+        name="Standard_Mix",
+        description="Standard balanced processing with full frequency enhancement",
         # All multipliers at 1.0 = standard BIG processing
     ),
     
-    # EXACT MATCH VARIANT - Identical to BIG_POWERFUL_STEM_MIX.wav
+    # REFERENCE VARIANT - Reference processing
     BigVariantProfile(
-        name="BIG_Exact_Match",
-        description="EXACT replica of the BIG_POWERFUL_STEM_MIX.wav that sounded amazing - identical processing",
-        # All multipliers at 1.0 = exact original processing that created the amazing file
-        # This produces identical results to the BIG_POWERFUL_STEM_MIX.wav you loved
+        name="Reference_Mix",
+        description="Reference processing matching the original mix specifications",
+        # All multipliers at 1.0 = baseline processing
     ),
     
     # ENHANCED BIG VARIANTS
     BigVariantProfile(
-        name="BIG_Massive_Drums", 
+        name="Drum_Heavy", 
         description="BIG processing with even MORE powerful drums - for drum-focused tracks",
         kick_boost_mult=1.5,          # Even MORE kick
         snare_boost_mult=1.4,         # Even MORE snare
@@ -64,7 +63,7 @@ BIG_VARIANTS = [
     ),
     
     BigVariantProfile(
-        name="BIG_Foundation_Bass",
+        name="Bass_Heavy",
         description="BIG processing with EXTREME bass power - foundation-shaking low end",
         bass_boost_mult=1.6,          # EXTREME bass boosts
         kick_boost_mult=1.3,          # Support kick too
@@ -73,7 +72,7 @@ BIG_VARIANTS = [
     ),
     
     BigVariantProfile(
-        name="BIG_Vocal_Domination", 
+        name="Vocal_Forward", 
         description="BIG processing with commanding vocal presence - vocals cut through everything",
         vocal_presence_mult=1.4,      # HUGE vocal presence
         air_boost_mult=1.3,           # More vocal air
@@ -85,7 +84,7 @@ BIG_VARIANTS = [
     ),
     
     BigVariantProfile(
-        name="BIG_Cinematic_Wide",
+        name="Wide_Stereo",
         description="BIG processing with EXTREME width - huge, cinematic soundstage", 
         drums_width_mult=1.5,         # Much wider drums
         vocals_width_mult=1.6,        # Much wider vocals  
@@ -95,7 +94,7 @@ BIG_VARIANTS = [
     ),
     
     BigVariantProfile(
-        name="BIG_Radio_Power",
+        name="Radio_Ready",
         description="BIG processing optimized for radio - punchy, loud, and impressive",
         kick_boost_mult=1.2,          # Punchy kick
         snare_boost_mult=1.3,         # Punchy snare  
@@ -106,7 +105,7 @@ BIG_VARIANTS = [
     ),
     
     BigVariantProfile(
-        name="BIG_Club_Energy", 
+        name="Club_Energy", 
         description="BIG processing for club/EDM - massive low end with energy",
         kick_boost_mult=1.6,          # HUGE kick for club
         bass_boost_mult=1.5,          # MASSIVE bass
@@ -119,7 +118,7 @@ BIG_VARIANTS = [
     ),
     
     BigVariantProfile(
-        name="BIG_Modern_Pop",
+        name="Modern_Pop",
         description="BIG processing for modern pop - balanced power with vocal focus",
         vocal_presence_mult=1.2,      # Clear pop vocals
         air_boost_mult=1.2,           # Modern air
@@ -130,7 +129,7 @@ BIG_VARIANTS = [
     ),
     
     BigVariantProfile(
-        name="BIG_Rock_Power",
+        name="Rock_Power",
         description="BIG processing for rock - aggressive, powerful, and driving",
         kick_boost_mult=1.3,          # Powerful rock kick
         snare_boost_mult=1.5,         # HUGE rock snare
@@ -142,7 +141,7 @@ BIG_VARIANTS = [
     ),
     
     BigVariantProfile(
-        name="BIG_Intimate_Powerful",
+        name="Intimate_Power",
         description="BIG processing with intimate feel but powerful impact - best of both worlds",
         vocal_presence_mult=1.1,      # Clear but intimate vocals
         air_boost_mult=1.1,           # Gentle air
@@ -157,7 +156,7 @@ BIG_VARIANTS = [
     ),
     
     BigVariantProfile(
-        name="BIG_Maximum_Impact",
+        name="Maximum_Impact",
         description="BIG processing pushed to the absolute maximum - most impressive possible",
         # EVERYTHING cranked up!
         kick_boost_mult=1.8,
@@ -192,7 +191,7 @@ def get_big_variant_profile(variant_name: str) -> BigVariantProfile:
         if variant.name == variant_name:
             return variant
     # Fallback to original BIG
-    return BIG_VARIANTS[0]  # BIG_Amazing
+    return BIG_VARIANTS[0]  # Standard_Mix
 
 def apply_big_variant_processing(stem_type: str, audio: np.ndarray, sample_rate: int, 
                                variant_profile: BigVariantProfile) -> np.ndarray:
@@ -201,10 +200,17 @@ def apply_big_variant_processing(stem_type: str, audio: np.ndarray, sample_rate:
     This takes the amazing BIG processing and applies the variant multipliers.
     Now respects CONFIG.pipeline.stem_gains for user control!
     """
-    from dsp_premitives import peaking_eq, shelf_filter, compressor, stereo_widener
+    from dsp_premitives import peaking_eq, shelf_filter, compressor, stereo_widener, apply_gain_db
     from config import CONFIG
     
     processed = audio.copy()
+    
+    # FIRST: Apply overall stem gain from CONFIG (this is what the user actually wants!)
+    stem_gain = CONFIG.pipeline.get_stem_gains().get(stem_type, 1.0)
+    if stem_gain != 1.0:
+        gain_db = 20 * np.log10(max(0.001, stem_gain))  # Convert to dB, prevent log(0)
+        processed = apply_gain_db(processed, gain_db)
+        print(f"      🎚️ Applied {stem_gain}x gain ({gain_db:.1f} dB) to {stem_type}")
     
     try:
         if stem_type == 'drums':

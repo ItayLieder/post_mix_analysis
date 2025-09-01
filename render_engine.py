@@ -9,7 +9,7 @@ from typing import Optional, Dict, Any, List, Tuple
 import os
 import numpy as np
 import soundfile as sf
-from processors import build_preview_cache  # Import the missing function
+from processors import build_preview_cache, render_from_cache  # Import the missing functions
 from dsp_premitives import *
 # ---- Dial state (what the user controls) ----
 

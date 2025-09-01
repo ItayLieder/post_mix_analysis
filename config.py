@@ -221,18 +221,18 @@ class PipelineConfig:
     # Stem combination variants to generate - BIG VARIANTS SYSTEM!
     stem_combinations: list = field(default_factory=lambda: [
         # BIG VARIANTS - The amazing processing that sounds INCREDIBLE!
-        ("BIG_Exact_Match", "big:BIG_Exact_Match"),  # EXACT replica of the amazing BIG_POWERFUL_STEM_MIX.wav - FIRST!
-        ("BIG_Amazing", "big:BIG_Amazing"),
-        ("BIG_Massive_Drums", "big:BIG_Massive_Drums"), 
-        ("BIG_Foundation_Bass", "big:BIG_Foundation_Bass"),
-        ("BIG_Vocal_Domination", "big:BIG_Vocal_Domination"),
-        ("BIG_Cinematic_Wide", "big:BIG_Cinematic_Wide"),
-        ("BIG_Radio_Power", "big:BIG_Radio_Power"),
-        ("BIG_Club_Energy", "big:BIG_Club_Energy"),
-        ("BIG_Modern_Pop", "big:BIG_Modern_Pop"),
-        ("BIG_Rock_Power", "big:BIG_Rock_Power"),
-        ("BIG_Intimate_Powerful", "big:BIG_Intimate_Powerful"),
-        ("BIG_Maximum_Impact", "big:BIG_Maximum_Impact"),
+        ("Reference_Mix", "big:Reference_Mix"),  # Reference processing - baseline mix
+        ("Standard_Mix", "big:Standard_Mix"),
+        ("Drum_Heavy", "big:Drum_Heavy"), 
+        ("Bass_Heavy", "big:Bass_Heavy"),
+        ("Vocal_Forward", "big:Vocal_Forward"),
+        ("Wide_Stereo", "big:Wide_Stereo"),
+        ("Radio_Ready", "big:Radio_Ready"),
+        ("Club_Energy", "big:Club_Energy"),
+        ("Modern_Pop", "big:Modern_Pop"),
+        ("Rock_Power", "big:Rock_Power"),
+        ("Intimate_Power", "big:Intimate_Power"),
+        ("Maximum_Impact", "big:Maximum_Impact"),
         
         # Original basic combinations (kept for compatibility)
         ("Stem_PunchyMix", "punchy"),
@@ -302,7 +302,7 @@ class PipelineConfig:
     stem_sum_target_peak: float = 0.98  # -0.17 dBFS (EXTREMELY LOUD!)
     
     # Output control - whether to create individual processed stem files
-    # If False, only creates the main mix file (e.g., "BIG_Amazing.wav")
+    # If False, only creates the main mix file (e.g., "Standard_Mix.wav")
     # If True, also creates individual stem files (e.g., "bass_processed.wav", "drums_processed.wav")
     create_individual_stem_files: bool = True
     
